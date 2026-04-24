@@ -473,3 +473,22 @@ For normal users, install from PyPI:
 ```bash
 pip install --upgrade indic-places
 ```
+
+### All-India village vocabulary
+
+The package can include village names imported from official/LGD-style village datasets.
+
+The import script adds only unique village names to:
+
+```text
+indic_places/data/custom_places.txt
+```
+
+Duplicate protection uses a normalized key, so names already present with different case, spacing, or punctuation are not added again.
+
+This improves village-level matching and correction, for example:
+
+```python
+ip.correct_place_name("DORA CHHAPR")
+ip.correct_place_name("MOHAN CHHAPR")
+```
