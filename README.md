@@ -1,16 +1,59 @@
 # Indic Places Library
 
-A Python library for Indian place-name lookup, fuzzy matching, OCR address cleanup, and merged-word address segmentation.
+Indian place-name lookup, fuzzy matching, OCR address cleanup, and merged-word address segmentation for Python.
 
-It helps normalize Indian OCR addresses by identifying place names, address terms, districts, states, towns, villages, and postal-place aliases.
+`indic-places` is useful when Indian addresses are extracted from OCR/scanned PDFs and words are joined together without spaces. It uses a large Indian place-name vocabulary to identify cities, towns, villages, districts, postal-place aliases, and common address tokens.
 
-## Install
+## Install from PyPI
+
+Install latest version:
 
 ```bash
 pip install --upgrade indic-places
 ```
 
-## Usage
+Force latest version without cache:
+
+```bash
+python -m pip install --no-cache-dir --upgrade --force-reinstall indic-places
+```
+
+Install exact version:
+
+```bash
+python -m pip install indic-places==1.1.7
+```
+
+Add to `requirements.txt`:
+
+```text
+indic-places>=1.1.7
+```
+
+## Import
+
+PyPI package name:
+
+```text
+indic-places
+```
+
+Python import name:
+
+```python
+from indic_places import IndicPlaces
+```
+
+## Data Stats
+
+| Metric | Count |
+|---|---:|
+| Structured GeoNames + postal records | 815,477 |
+| Unique Indian place names | 817,641 |
+| Runtime OCR/custom place aliases | 652,331 |
+| Coverage | India-wide |
+
+## Quick Python Usage
 
 ```python
 from indic_places import IndicPlaces
@@ -27,14 +70,286 @@ Output:
 PILASSERY ADIVARAM PUTHUPPADI ADIVARAM PUDUPADI KATTIPARA ADIVARAM THAMARASSERY KOZHIKODE - 673586
 ```
 
-## Data
+## Use from CMD / Terminal
 
-- 817,641 unique Indian place names
-- 652,331 runtime OCR/custom place aliases
+### Check installed version
+
+```cmd
+python -c "import importlib.metadata as m; print(m.version('indic-places'))"
+```
+
+### Normalize an OCR address from CMD
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.normalize_address_spacing('PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586'))"
+```
+
+### Place lookup from CMD
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.lookup('Bangalor', top_n=5))"
+```
+
+### Extract places from text using CMD
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.extract_places('PONMINISSERY HOUSE PERAMBRA THRISSUR 680689'))"
+```
+
+### Word segmentation from CMD
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); r=ip.segment('iliveinmumbaiorkerala'); print(r.segmented)"
+```
+
+## CLI Usage
+
+If the console script is available after install:
+
+```cmd
+indic-places stats
+```
+
+```cmd
+indic-places lookup Bangalor
+```
+
+```cmd
+indic-places segment iliveinmumbaiorkerala
+```
+
+```cmd
+indic-places extract "PONMINISSERY HOUSE PERAMBRA THRISSUR 680689"
+```
+
+If the command is not found, use:
+
+```cmd
+python -m indic_places.cli stats
+```
+
+## What This Library Solves
+
+OCR may return Indian addresses like:
+
+```text
+PILASSERYADIVARAMPUTHUPPADIADIVARAM
+KUNNUMPURATHHOUSEKALLARAP.O
+THAMARASSERYKOZHIKODE
+```
+
+This library helps convert merged OCR text into cleaner address text by using Indian place names and address vocabulary.
+
+Example:
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+raw = "KUNNUMPURATHHOUSE KALLARA P.O KOTTAYAM - 686611"
+clean = ip.normalize_address_spacing(raw)
+
+print(clean)
+```
+
+Output style:
+
+```text
+KUNNUMPURATH HOUSE KALLARA P.O KOTTAYAM - 686611
+```
+
+## Main Features
+
+- Indian place-name lookup
+- OCR merged-address spacing
+- Fuzzy lookup for misspelled place names
+- Word segmentation for merged text
+- Place extraction from address text
 - India-wide GeoNames and postal vocabulary
+- Runtime OCR/custom place aliases from `indic_places/data/custom_places.txt`
 
-## Attribution
+## Recommended Integration Pattern
 
-This package includes data derived from GeoNames, licensed under CC BY 4.0.
+For large OCR/document pipelines, do not create `IndicPlaces()` again and again. Create it once and reuse it.
 
-Source: https://github.com/Tinku746286/indic_names_library
+```python
+from indic_places import IndicPlaces
+
+_PLACE_ENGINE = IndicPlaces()
+
+
+def clean_address(address: str) -> str:
+    address = " ".join(str(address or "").split()).strip(" ,:-|")
+
+    if not address:
+        return ""
+
+    return _PLACE_ENGINE.normalize_address_spacing(address)
+```
+
+Use it after your extraction logic has already identified the address candidate.
+
+```python
+raw_address = "PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586"
+final_address = clean_address(raw_address)
+print(final_address)
+```
+
+## Use with an Existing Address Extractor
+
+If your project already has a final address cleanup function, call `normalize_address_spacing()` there.
+
+```python
+from indic_places import IndicPlaces
+
+_PLACE_ENGINE = IndicPlaces()
+
+
+def finalize_address(address: str) -> str:
+    address = " ".join(str(address or "").split()).strip(" ,:-|")
+
+    if not address:
+        return ""
+
+    address = _PLACE_ENGINE.normalize_address_spacing(address)
+
+    return " ".join(address.split()).strip(" ,:-|")
+```
+
+If your extraction function stores a best address candidate before returning, normalize before storing the final value.
+
+```python
+def evaluate_and_store_address(candidate: str):
+    candidate = finalize_address(candidate)
+
+    if not candidate:
+        return False
+
+    # Store candidate in your output dictionary/model.
+    return True
+```
+
+## Lookup Places
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+results = ip.lookup("Bangalor", top_n=5)
+
+for r in results:
+    print(r.name, r.state, r.district, r.pincode, r.score)
+```
+
+## Extract Places from Text
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+text = "PONMINISSERY HOUSE PERAMBRA THRISSUR 680689"
+places = ip.extract_places(text)
+
+for p in places:
+    print(p.name, p.state, p.district, p.pincode)
+```
+
+## Word Segmentation
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+result = ip.segment("iliveinmumbaiorkerala")
+print(result.segmented)
+print(result.score)
+```
+
+## Data Files
+
+Runtime package data:
+
+```text
+indic_places/data/address_terms.txt
+indic_places/data/custom_places.txt
+indic_places/data/places_index.json.gz
+```
+
+Supporting/reference data in repository:
+
+```text
+data/unique_place_names.txt
+data/geonames_india_places_full.csv.gz
+data/by_state_geonames/
+```
+
+## Data Sources and Attribution
+
+This package includes place-name vocabulary derived from open geographical datasets, including GeoNames India gazetteer and postal data.
+
+GeoNames data is licensed under Creative Commons Attribution 4.0. Please credit GeoNames when using data derived from GeoNames.
+
+Suggested attribution:
+
+```text
+This product includes data derived from GeoNames (https://www.geonames.org/), licensed under CC BY 4.0.
+```
+
+The data is provided as-is and may contain spelling variants, alternate names, outdated entries, or OCR-specific aliases.
+
+## Privacy and Project Neutrality
+
+This package is public and project-neutral.
+
+It does not include private project names, private customer data, private document text, or proprietary extraction logic. Use it as a reusable Indian place-name and OCR address cleanup utility.
+
+## Troubleshooting
+
+### Old version still installing
+
+```bash
+python -m pip uninstall indic-places -y
+python -m pip install --no-cache-dir --upgrade --force-reinstall indic-places
+```
+
+### Check installed version
+
+```bash
+python -c "import importlib.metadata as m; print(m.version('indic-places'))"
+```
+
+### Command not found
+
+```bash
+python -m indic_places.cli stats
+```
+
+### Works locally but not after pip install
+
+Make sure package data files are included in the published wheel:
+
+```text
+MANIFEST.in
+pyproject.toml
+indic_places/data/custom_places.txt
+indic_places/data/address_terms.txt
+indic_places/data/places_index.json.gz
+```
+
+## Source Code
+
+GitHub repository:
+
+```text
+https://github.com/Tinku746286/indic_names_library
+```
+
+For normal users, install from PyPI:
+
+```bash
+pip install --upgrade indic-places
+```
