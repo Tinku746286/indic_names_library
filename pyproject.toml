@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "indic-places"
-version = "1.1.7"
+version = "1.2.2"
 description = "Indian place-name lookup, OCR address cleanup, and merged-word address segmentation"
 readme = "README.md"
 requires-python = ">=3.8"

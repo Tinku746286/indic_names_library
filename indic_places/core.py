@@ -18,6 +18,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from difflib import SequenceMatcher
 
 try:
     from importlib import resources
@@ -369,6 +370,287 @@ class IndicPlaces:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def _lookup_admin_name_set(self) -> set[str]:
+        cached = getattr(self, "_lookup_admin_names_cache", None)
+        if cached is not None:
+            return cached
+
+        names: set[str] = set()
+
+        for rec in self.records:
+            for field in ("state", "district"):
+                val = normalize_place_name(rec.get(field, ""))
+                if val:
+                    names.add(val.replace(" ", ""))
+
+            kind = str(rec.get("kind", "")).lower()
+            norm = normalize_place_name(rec.get("name", "")).replace(" ", "")
+
+            if kind in {"place", "city", "town", "village", "district", "state"} and norm:
+                names.add(norm)
+
+        setattr(self, "_lookup_admin_names_cache", names)
+        return names
+
+    def _lookup_sort_key(self, result: PlaceResult, compact_q: str) -> tuple:
+        name = str(result.name or "")
+        norm = normalize_place_name(result.normalized or result.name).replace(" ", "")
+        kind = str(result.kind or "").lower()
+
+        office_suffix_penalty = 1 if _OFFICE_SUFFIX_RE.search(name) else 0
+        post_office_kind_penalty = 1 if kind in {
+            "post_office",
+            "sub_office",
+            "head_office",
+            "village_or_branch_office",
+        } else 0
+
+        admin_names = self._lookup_admin_name_set()
+        admin_bonus = 1 if norm in admin_names else 0
+
+        exact_prefix_bonus = 1 if norm.startswith(compact_q) and len(norm) > len(compact_q) else 0
+        exact_same_penalty = 1 if norm == compact_q else 0
+
+        return (
+            -result.score,
+            -admin_bonus,
+            office_suffix_penalty,
+            post_office_kind_penalty,
+            exact_same_penalty,
+            -exact_prefix_bonus,
+            result.edit_distance,
+            len(norm),
+            name.lower(),
+        )
+
+
+
+    def _strip_office_suffix_for_correction(self, value: str) -> str:
+        s = str(value or "").strip(" ,:-|")
+        if not s:
+            return ""
+
+        s = re.sub(
+            r"(?i)\\b(?:G\\.?P\\.?O\\.?|H\\.?O\\.?|S\\.?O\\.?|B\\.?O\\.?|P\\.?O\\.?|GPO|HO|SO|BO|PO)$",
+            "",
+            s,
+        )
+        return re.sub(r"\\s+", " ", s).strip(" ,:-|")
+
+    def _correction_state_set(self) -> set[str]:
+        cached = getattr(self, "_correction_state_set_cache", None)
+        if cached is not None:
+            return cached
+
+        states: set[str] = set()
+        for rec in self.records:
+            state = normalize_place_name(rec.get("state", "")).replace(" ", "")
+            if state:
+                states.add(state)
+
+        setattr(self, "_correction_state_set_cache", states)
+        return states
+
+    def _correction_candidate_rows(self, target: str, state_hint: str = "") -> list[tuple]:
+        q = normalize_place_name(target).replace(" ", "")
+        state_q = normalize_place_name(state_hint).replace(" ", "")
+
+        if not q:
+            return []
+
+        rows: list[tuple] = []
+        seen: set[tuple] = set()
+
+        try:
+            lookup_results = self.lookup(target, top_n=80)
+        except Exception:
+            lookup_results = []
+
+        for r in lookup_results:
+            for source_name in (
+                getattr(r, "district", ""),
+                self._strip_office_suffix_for_correction(getattr(r, "name", "")),
+                getattr(r, "state", ""),
+            ):
+                name = str(source_name or "").strip()
+                norm = normalize_place_name(name).replace(" ", "")
+                if len(norm) < 4:
+                    continue
+
+                state = str(getattr(r, "state", "") or "").strip()
+                district = str(getattr(r, "district", "") or "").strip()
+                key = (norm, normalize_place_name(state), normalize_place_name(district))
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                rows.append((name, state, district, "lookup"))
+
+        for rec in self.records:
+            state = str(rec.get("state", "") or "").strip()
+            district = str(rec.get("district", "") or "").strip()
+
+            if state_q and normalize_place_name(state).replace(" ", "") != state_q:
+                continue
+
+            raw_names = [
+                rec.get("name", ""),
+                district,
+                state,
+                self._strip_office_suffix_for_correction(rec.get("name", "")),
+            ]
+
+            for raw_name in raw_names:
+                name = str(raw_name or "").strip()
+                norm = normalize_place_name(name).replace(" ", "")
+
+                if len(norm) < 4:
+                    continue
+
+                key = (norm, normalize_place_name(state), normalize_place_name(district))
+                if key in seen:
+                    continue
+
+                sim = SequenceMatcher(None, q, norm).ratio()
+                useful = (
+                    norm.startswith(q)
+                    or q.startswith(norm)
+                    or q in norm
+                    or sim >= 0.72
+                    or (len(q) >= 4 and len(norm) > 1 and norm[1:].startswith(q[: min(len(q), len(norm) - 1)]))
+                )
+
+                if useful:
+                    seen.add(key)
+                    rows.append((name, state, district, "records"))
+
+        return rows
+
+    def correct_place_name(self, query: str, state_hint: str = "", top_n: int = 1):
+        original = str(query or "").strip()
+        if not original:
+            return [] if top_n != 1 else ""
+
+        tokens = re.findall(r"[A-Za-z]+", original)
+        states = self._correction_state_set()
+
+        inferred_state = state_hint
+        place_tokens: list[str] = []
+
+        for token in tokens:
+            nt = normalize_place_name(token).replace(" ", "")
+            if nt in states:
+                inferred_state = token
+            else:
+                place_tokens.append(token)
+
+        target = max(place_tokens, key=len) if place_tokens else original
+        rows = self._correction_candidate_rows(target, inferred_state)
+
+        q = normalize_place_name(target).replace(" ", "")
+        state_q = normalize_place_name(inferred_state).replace(" ", "")
+
+        scored = []
+        for name, state, district, source in rows:
+            norm = normalize_place_name(name).replace(" ", "")
+            if not norm:
+                continue
+
+            sim = SequenceMatcher(None, q, norm).ratio()
+
+            prefix_bonus = 25 if norm.startswith(q) and len(norm) > len(q) else 0
+            contains_bonus = 8 if q in norm else 0
+            missing_first_bonus = 12 if len(norm) > 1 and norm[1:].startswith(q[: min(len(q), len(norm) - 1)]) else 0
+            exact_same_penalty = 30 if norm == q else 0
+
+            office_penalty = 20 if re.search(
+                r"(?i)\\b(?:G\\.?P\\.?O\\.?|H\\.?O\\.?|S\\.?O\\.?|B\\.?O\\.?|P\\.?O\\.?|GPO|HO|SO|BO|PO)$",
+                name,
+            ) else 0
+
+            admin_bonus = 15 if norm in {
+                normalize_place_name(state).replace(" ", ""),
+                normalize_place_name(district).replace(" ", ""),
+            } else 0
+
+            state_bonus = 20 if state_q and normalize_place_name(state).replace(" ", "") == state_q else 0
+
+            score = (
+                (sim * 100)
+                + prefix_bonus
+                + contains_bonus
+                + missing_first_bonus
+                + admin_bonus
+                + state_bonus
+                - exact_same_penalty
+                - office_penalty
+            )
+
+            scored.append((score, len(norm), name, state, district, source))
+
+        scored.sort(key=lambda x: (-x[0], x[1], x[2].lower()))
+
+        names: list[str] = []
+        seen_names: set[str] = set()
+
+        for score, _length, name, _state, _district, _source in scored:
+            clean = self._strip_office_suffix_for_correction(name)
+            key = normalize_place_name(clean).replace(" ", "")
+            if not key or key in seen_names:
+                continue
+
+            if key == q and len(scored) > 1:
+                continue
+
+            names.append(clean)
+            seen_names.add(key)
+
+            if len(names) >= max(int(top_n or 1), 1):
+                break
+
+        if top_n == 1:
+            return names[0] if names else original
+
+        return names
+
+    def correct_place(self, query: str, state_hint: str = "", top_n: int = 1):
+        names = self.correct_place_name(query, state_hint=state_hint, top_n=top_n)
+        if isinstance(names, str):
+            names_list = [names] if names else []
+        else:
+            names_list = names
+
+        out = []
+        for name in names_list:
+            details = {"name": name, "state": "", "district": "", "pincode": ""}
+
+            try:
+                matches = self.lookup(name, top_n=20)
+            except Exception:
+                matches = []
+
+            name_key = normalize_place_name(name).replace(" ", "")
+            for m in matches:
+                m_name = self._strip_office_suffix_for_correction(getattr(m, "name", ""))
+                m_key = normalize_place_name(m_name).replace(" ", "")
+                district_key = normalize_place_name(getattr(m, "district", "")).replace(" ", "")
+
+                if m_key == name_key or district_key == name_key:
+                    details = {
+                        "name": name,
+                        "state": getattr(m, "state", "") or "",
+                        "district": getattr(m, "district", "") or "",
+                        "pincode": getattr(m, "pincode", "") or "",
+                    }
+                    break
+
+            out.append(details)
+
+        return out[0] if top_n == 1 else out
+
+
     def lookup(
         self,
         query: str,
@@ -462,7 +744,7 @@ class IndicPlaces:
                 )
             )
 
-        results.sort(key=lambda r: (-r.score, r.edit_distance, len(r.normalized), r.name))
+        results.sort(key=lambda r: self._lookup_sort_key(r, compact_q))
         return results[:top_n]
 
     def is_place(self, text: str, *, min_score: float = 82.0) -> bool:
