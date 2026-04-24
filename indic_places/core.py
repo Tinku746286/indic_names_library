@@ -34,66 +34,7 @@ _OFFICE_SUFFIX_RE = re.compile(
 _PIN_RE = re.compile(r"\b\d{6}\b")
 _SPACE_RE = re.compile(r"\s+")
 
-_COMMON_SEGMENT_WORDS: Dict[str, int] = {
-    # Address/document words
-    "i": 9000,
-    "am": 8000,
-    "live": 8000,
-    "in": 12000,
-    "at": 9000,
-    "from": 9000,
-    "to": 9000,
-    "and": 12000,
-    "or": 9000,
-    "near": 9000,
-    "via": 7000,
-    "post": 7000,
-    "po": 7000,
-    "p": 2000,
-    "o": 2000,
-    "house": 9000,
-    "nivas": 6500,
-    "bhavan": 6500,
-    "villa": 5500,
-    "road": 10000,
-    "rd": 5000,
-    "street": 8000,
-    "st": 3000,
-    "lane": 8000,
-    "marg": 6000,
-    "colony": 6500,
-    "nagar": 7000,
-    "puram": 6000,
-    "pura": 5000,
-    "gram": 4500,
-    "village": 9000,
-    "taluk": 7000,
-    "taluka": 7000,
-    "tk": 5000,
-    "dist": 8000,
-    "district": 9000,
-    "dt": 5000,
-    "state": 7000,
-    "city": 7000,
-    "pin": 8000,
-    "pincode": 8000,
-    "branch": 7000,
-    "office": 6500,
-    "regional": 5500,
-    "north": 4000,
-    "south": 4000,
-    "east": 4000,
-    "west": 4000,
-    "central": 3500,
-    "main": 6500,
-    "cross": 4500,
-    "bazaar": 4500,
-    "bazar": 4500,
-    "old": 3000,
-    "new": 3000,
-    "upper": 2500,
-    "lower": 2500,
-}
+_COMMON_SEGMENT_WORDS: Dict[str, int] = {}
 
 
 @dataclass(frozen=True)
@@ -294,7 +235,7 @@ class IndicPlaces:
         self._exact: Dict[str, List[int]] = {}
         self._delete_index: Dict[str, List[int]] = {}
         self._word_freq: Dict[str, int] = dict(_COMMON_SEGMENT_WORDS)
-        self._max_word_len = max(map(len, self._word_freq))
+        self._max_word_len = max(map(len, self._word_freq), default=1)
 
         self._load_data()
         self._build_exact_index()
@@ -617,9 +558,343 @@ class IndicPlaces:
         return SegmentResult(original=original, segmented=segmented, tokens=tokens, known_tokens=dp[0][2])
 
     def normalize_address_spacing(self, text: str) -> str:
-        """Convenience wrapper for OCR address spacing."""
-        return self.segment(text).segmented.upper()
+        # Data-driven OCR address spacing.
+        # Address terms are loaded from indic_places/data/address_terms.txt.
+        # Extra corpus place aliases are loaded from indic_places/data/custom_places.txt.
+        # No address/place words are hardcoded in Python matching logic.
+        original = str(text or "").strip()
+        if not original:
+            return ""
 
+        original = re.sub(r"([A-Za-z])(\d{6})\b", r"\1 \2", original)
+
+        def norm_key(value: str) -> str:
+            return normalize_place_name(value).replace(" ", "")
+
+        def read_data_lines(filename: str) -> list[str]:
+            try:
+                from importlib import resources
+                data_file = resources.files("indic_places").joinpath(f"data/{filename}")
+                raw = data_file.read_text(encoding="utf-8")
+            except Exception:
+                raw = ""
+
+            out = []
+
+            for line in raw.splitlines():
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    out.append(line)
+
+            return out
+
+        def load_address_terms() -> tuple[set[str], set[str], list[str]]:
+            cached = getattr(self, "_address_terms_cache_v6", None)
+            if cached is not None:
+                return cached
+
+            long_terms: set[str] = set()
+            short_terms: set[str] = set()
+            raw_terms: list[str] = []
+
+            for line in read_data_lines("address_terms.txt"):
+                key = norm_key(line)
+                raw_upper = line.upper().strip()
+
+                if len(key) >= 4:
+                    long_terms.add(key)
+                elif len(key) >= 2:
+                    short_terms.add(key)
+
+                if len(key) >= 2 and re.search(r"[^A-Za-z0-9\s]", raw_upper):
+                    raw_terms.append(raw_upper)
+
+            raw_terms = sorted(set(raw_terms), key=len, reverse=True)
+            cached = (long_terms, short_terms, raw_terms)
+            setattr(self, "_address_terms_cache_v6", cached)
+            return cached
+
+        def load_custom_places() -> set[str]:
+            cached = getattr(self, "_custom_place_cache_v6", None)
+            if cached is not None:
+                return cached
+
+            places: set[str] = set()
+
+            for line in read_data_lines("custom_places.txt"):
+                key = norm_key(line)
+                if len(key) >= 4:
+                    places.add(key)
+
+            setattr(self, "_custom_place_cache_v6", places)
+            return places
+
+        long_address_terms, short_address_terms, raw_address_terms = load_address_terms()
+        custom_places = load_custom_places()
+
+        exact_cache = getattr(self, "_address_exact_cache_v6", None)
+        if exact_cache is None:
+            exact_cache = {}
+            setattr(self, "_address_exact_cache_v6", exact_cache)
+
+        max_exact_len = getattr(self, "_address_max_exact_len_v6", None)
+        if max_exact_len is None:
+            try:
+                place_lengths = [len(str(k)) for k in getattr(self, "_exact", {}).keys()]
+            except Exception:
+                place_lengths = []
+            term_lengths = [len(k) for k in long_address_terms | short_address_terms | custom_places]
+            max_exact_len = max(place_lengths + term_lengths + [24])
+            max_exact_len = min(max(max_exact_len, 24), 64)
+            setattr(self, "_address_max_exact_len_v6", max_exact_len)
+
+        def raw_term_pattern(term: str):
+            pieces = []
+            for ch in term:
+                if ch.isalnum():
+                    pieces.append(re.escape(ch))
+                else:
+                    pieces.append(r"\s*" + re.escape(ch) + r"\s*")
+            return re.compile("".join(pieces), re.IGNORECASE)
+
+        raw_term_patterns = getattr(self, "_address_raw_term_patterns_v6", None)
+        if raw_term_patterns is None:
+            raw_term_patterns = [(term, raw_term_pattern(term)) for term in raw_address_terms]
+            setattr(self, "_address_raw_term_patterns_v6", raw_term_patterns)
+
+        def restore_raw_terms(value: str) -> str:
+            out = str(value or "")
+            for term, pattern in raw_term_patterns:
+                out = pattern.sub(term, out)
+            return out
+
+        def clean_spaces(value: str) -> str:
+            value = restore_raw_terms(str(value or ""))
+            value = _SPACE_RE.sub(" ", value).strip(" ,:-|")
+            value = re.sub(r"\s*([,;:])\s*", r"\1 ", value)
+            value = re.sub(r"\s*([.])\s*", r"\1 ", value)
+            value = restore_raw_terms(value)
+            return _SPACE_RE.sub(" ", value).strip(" ,:-|")
+
+        def add_spaces_after_raw_terms(value: str) -> str:
+            out = str(value or "")
+            for term, pattern in raw_term_patterns:
+                out = pattern.sub(term, out)
+                out = re.sub(rf"(?i)({re.escape(term)})(?=[A-Za-z0-9])", r"\1 ", out)
+            return out
+
+        def looks_oversegmented(value: str) -> bool:
+            words = re.findall(r"[A-Za-z]+", str(value or ""))
+            if len(words) < 5:
+                return False
+
+            short_words = [w for w in words if len(w) <= 4]
+            one_char_words = [w for w in words if len(w) == 1]
+            short_ratio = len(short_words) / max(len(words), 1)
+
+            return bool(short_ratio >= 0.45 or (one_char_words and short_ratio >= 0.30))
+
+        def is_exact_place(value: str) -> bool:
+            key = norm_key(value)
+
+            if len(key) < 4:
+                return False
+
+            cache_key = "place:" + key
+            if cache_key in exact_cache:
+                return exact_cache[cache_key]
+
+            ok = False
+
+            # Corpus aliases / extra place names from data/custom_places.txt.
+            if key in custom_places:
+                ok = True
+
+            # Built index place names.
+            if not ok and len(key) >= 6:
+                try:
+                    ok = key in getattr(self, "_exact", {})
+                except Exception:
+                    ok = False
+
+                if not ok:
+                    try:
+                        try:
+                            hits = self.lookup(key, top_n=8, min_score=99)
+                        except TypeError:
+                            hits = self.lookup(key, top_n=8)
+                    except Exception:
+                        hits = []
+
+                    for result in hits or []:
+                        result_norm = norm_key(getattr(result, "normalized", ""))
+                        result_name = norm_key(getattr(result, "name", ""))
+
+                        try:
+                            score = float(getattr(result, "score", 0) or 0)
+                        except Exception:
+                            score = 0.0
+
+                        try:
+                            edit_distance = int(getattr(result, "edit_distance", 99) or 99)
+                        except Exception:
+                            edit_distance = 99
+
+                        if edit_distance == 0 and score >= 99 and (
+                            result_norm == key
+                            or result_name == key
+                            or result_name.startswith(key)
+                        ):
+                            ok = True
+                            break
+
+            exact_cache[cache_key] = ok
+            return ok
+
+        def has_exact_place_at(compact: str, start: int) -> bool:
+            end_limit = min(len(compact), start + max_exact_len)
+            for end in range(end_limit, start + 3, -1):
+                if is_exact_place(compact[start:end]):
+                    return True
+            return False
+
+        def token_kind(piece: str, compact: str, start: int, end: int) -> str:
+            key = norm_key(piece)
+
+            if not key:
+                return ""
+
+            if key in long_address_terms:
+                return "term"
+
+            # Short terms like PO are allowed only in safe context:
+            # not at the beginning, and followed by an exact place.
+            # This prevents PO from splitting PONMINISSERY.
+            if key in short_address_terms:
+                if start > 0 and has_exact_place_at(compact, end):
+                    return "term"
+
+            if is_exact_place(key):
+                return "place"
+
+            return ""
+
+        def longest_known_at(compact: str, start: int) -> tuple[str, str]:
+            end_limit = min(len(compact), start + max_exact_len)
+
+            for end in range(end_limit, start + 1, -1):
+                piece = compact[start:end]
+                kind = token_kind(piece, compact, start, end)
+                if kind:
+                    return piece, kind
+
+            return "", ""
+
+        def split_compact_alpha(alpha: str) -> list[str]:
+            compact = re.sub(r"[^A-Za-z]", "", str(alpha or "")).upper()
+            if not compact:
+                return []
+
+            if len(compact) < 8:
+                return [compact]
+
+            parts: list[tuple[str, str]] = []
+            buffer: list[str] = []
+            i = 0
+
+            while i < len(compact):
+                match, kind = longest_known_at(compact, i)
+
+                if match:
+                    if buffer:
+                        parts.append(("unknown", "".join(buffer)))
+                        buffer = []
+
+                    parts.append((kind, match.upper()))
+                    i += len(match)
+                else:
+                    buffer.append(compact[i])
+                    i += 1
+
+            if buffer:
+                parts.append(("unknown", "".join(buffer)))
+
+            # Merge long unknown + suffix-place only when that place is followed by a data term.
+            # Example: PANIKUL + ANGARA + HOUSE -> PANIKULANGARA + HOUSE.
+            # But do NOT merge MUKALEL + ATHIRAMPUZHA + ATHIRAMPUZHA.
+            merged_parts: list[tuple[str, str]] = []
+            idx = 0
+
+            while idx < len(parts):
+                kind, value = parts[idx]
+
+                if (
+                    kind == "unknown"
+                    and idx + 2 < len(parts)
+                    and parts[idx + 1][0] == "place"
+                    and parts[idx + 2][0] == "term"
+                    and len(value) >= 4
+                ):
+                    suffix_place = parts[idx + 1][1]
+                    merged_parts.append(("unknown", value + suffix_place))
+                    idx += 2
+                    continue
+
+                merged_parts.append((kind, value))
+                idx += 1
+
+            merged: list[str] = []
+
+            for kind, value in merged_parts:
+                # Tiny unknown fragments are safer merged backward.
+                if kind == "unknown" and len(value) <= 3 and merged:
+                    merged[-1] = merged[-1] + value
+                else:
+                    merged.append(value)
+
+            candidate = " ".join(x for x in merged if x)
+
+            if looks_oversegmented(candidate):
+                return [compact]
+
+            return [x for x in merged if x]
+
+        def split_mixed_token(token: str) -> list[str]:
+            token = str(token or "").strip()
+            if not token:
+                return []
+
+            chunks = re.findall(r"[A-Za-z]+|\d+|[^A-Za-z\d]+", token)
+            out: list[str] = []
+
+            for chunk in chunks:
+                if re.fullmatch(r"[A-Za-z]+", chunk):
+                    out.extend(split_compact_alpha(chunk))
+                else:
+                    cleaned = restore_raw_terms(chunk.strip())
+                    if cleaned:
+                        out.append(cleaned)
+
+            return out
+
+        collapsed = add_spaces_after_raw_terms(original)
+
+        if looks_oversegmented(collapsed):
+            collapsed = re.sub(r"(?<=[A-Za-z])\s+(?=[A-Za-z])", "", collapsed)
+            collapsed = add_spaces_after_raw_terms(collapsed)
+
+        tokens = clean_spaces(collapsed).split()
+        fixed: list[str] = []
+
+        for token in tokens:
+            fixed.extend(split_mixed_token(token))
+
+        result = clean_spaces(" ".join(x for x in fixed if x)).upper()
+
+        if looks_oversegmented(result):
+            return clean_spaces(collapsed).upper()
+
+        return result
     def stats(self) -> Dict[str, int]:
         by_kind: Dict[str, int] = {}
         for rec in self.records:

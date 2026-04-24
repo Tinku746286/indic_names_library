@@ -1,0 +1,22 @@
+# Data-driven address terms for OCR spacing.
+# These are not hardcoded in Python code.
+# Add project/corpus terms here when needed.
+
+HOUSE
+ROAD
+STREET
+LANE
+POST
+NAGAR
+COLONY
+VILLAGE
+DISTRICT
+BHAVAN
+NIVAS
+BUILDING
+APARTMENT
+S/O
+D/O
+W/O
+C/O
+P.O

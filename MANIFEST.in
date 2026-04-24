@@ -1,2 +1,3 @@
 include README.md
 recursive-include indic_places/data *.json *.json.gz *.txt
+recursive-include indic_places/data *.txt
