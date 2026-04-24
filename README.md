@@ -4,12 +4,13 @@ A comprehensive database of **165,627 Indian place names** (post offices, villag
 sourced from India Post, covering all 37 states & Union Territories.
 
 ## Stats
-| Metric | Count |
-|--------|-------|
-| Total records | 165,627 |
-| Unique place names | 145,086 |
-| States & UTs covered | 37 |
 
+| Metric | Count |
+|---|---:|
+| Structured GeoNames + postal records | 815,477 |
+| Unique place names | 817,641 |
+| Runtime OCR/custom place aliases | 652,331 |
+| States/UTs covered | India-wide |
 ## Structure
 ```
 data/
