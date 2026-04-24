@@ -534,3 +534,21 @@ indic_places/data/custom_places.txt
 ```
 
 The importer keeps only unique names and filters rows to South Indian states/UTs by state column when available.
+
+### Kerala LGD locality vocabulary
+
+Kerala LGD data can be imported from downloaded LGD ZIP/XLS files. The importer extracts unique names from district, subdistrict, block, village, panchayat, urban local body, traditional local body, and ward-style files.
+
+Output files:
+
+```text
+data/kerala_lgd_names_unique.txt
+data/kerala_lgd_names_full.csv.gz
+indic_places/data/custom_places.txt
+```
+
+Raw downloaded source files should stay ignored under:
+
+```text
+data/kerala_lgd_input/
+```

@@ -42,3 +42,5 @@ data/south_india_input/
 data/south_india_admin_localities_full.csv
 data/lgd_villages_input/
 data/all_india_villages_full.csv
+data/kerala_lgd_input/
+data/kerala_lgd_names_full.csv
