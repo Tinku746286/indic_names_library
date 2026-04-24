@@ -528,132 +528,6 @@ class IndicPlaces:
 
         return rows
 
-    def correct_place_name(self, query: str, state_hint: str = "", top_n: int = 1):
-        original = str(query or "").strip()
-        if not original:
-            return [] if top_n != 1 else ""
-
-        tokens = re.findall(r"[A-Za-z]+", original)
-        states = self._correction_state_set()
-
-        inferred_state = state_hint
-        place_tokens: list[str] = []
-
-        for token in tokens:
-            nt = normalize_place_name(token).replace(" ", "")
-            if nt in states:
-                inferred_state = token
-            else:
-                place_tokens.append(token)
-
-        target = max(place_tokens, key=len) if place_tokens else original
-        rows = self._correction_candidate_rows(target, inferred_state)
-
-        q = normalize_place_name(target).replace(" ", "")
-        state_q = normalize_place_name(inferred_state).replace(" ", "")
-
-        scored = []
-        for name, state, district, source in rows:
-            norm = normalize_place_name(name).replace(" ", "")
-            if not norm:
-                continue
-
-            sim = SequenceMatcher(None, q, norm).ratio()
-
-            prefix_bonus = 25 if norm.startswith(q) and len(norm) > len(q) else 0
-            contains_bonus = 8 if q in norm else 0
-            missing_first_bonus = 12 if len(norm) > 1 and norm[1:].startswith(q[: min(len(q), len(norm) - 1)]) else 0
-            exact_same_penalty = 30 if norm == q else 0
-
-            office_penalty = 20 if re.search(
-                r"(?i)\\b(?:G\\.?P\\.?O\\.?|H\\.?O\\.?|S\\.?O\\.?|B\\.?O\\.?|P\\.?O\\.?|GPO|HO|SO|BO|PO)$",
-                name,
-            ) else 0
-
-            admin_bonus = 15 if norm in {
-                normalize_place_name(state).replace(" ", ""),
-                normalize_place_name(district).replace(" ", ""),
-            } else 0
-
-            state_bonus = 20 if state_q and normalize_place_name(state).replace(" ", "") == state_q else 0
-
-            score = (
-                (sim * 100)
-                + prefix_bonus
-                + contains_bonus
-                + missing_first_bonus
-                + admin_bonus
-                + state_bonus
-                - exact_same_penalty
-                - office_penalty
-            )
-
-            scored.append((score, len(norm), name, state, district, source))
-
-        scored.sort(key=lambda x: (-x[0], x[1], x[2].lower()))
-
-        names: list[str] = []
-        seen_names: set[str] = set()
-
-        for score, _length, name, _state, _district, _source in scored:
-            clean = self._strip_office_suffix_for_correction(name)
-            key = normalize_place_name(clean).replace(" ", "")
-            if not key or key in seen_names:
-                continue
-
-            if key == q and len(scored) > 1:
-                continue
-
-            names.append(clean)
-            seen_names.add(key)
-
-            if len(names) >= max(int(top_n or 1), 1):
-                break
-
-        if top_n == 1:
-            return names[0] if names else original
-
-        return names
-
-    def correct_place(self, query: str, state_hint: str = "", top_n: int = 1):
-        names = self.correct_place_name(query, state_hint=state_hint, top_n=top_n)
-        if isinstance(names, str):
-            names_list = [names] if names else []
-        else:
-            names_list = names
-
-        out = []
-        for name in names_list:
-            details = {"name": name, "state": "", "district": "", "pincode": ""}
-
-            try:
-                matches = self.lookup(name, top_n=20)
-            except Exception:
-                matches = []
-
-            name_key = normalize_place_name(name).replace(" ", "")
-            for m in matches:
-                m_name = self._strip_office_suffix_for_correction(getattr(m, "name", ""))
-                m_key = normalize_place_name(m_name).replace(" ", "")
-                district_key = normalize_place_name(getattr(m, "district", "")).replace(" ", "")
-
-                if m_key == name_key or district_key == name_key:
-                    details = {
-                        "name": name,
-                        "state": getattr(m, "state", "") or "",
-                        "district": getattr(m, "district", "") or "",
-                        "pincode": getattr(m, "pincode", "") or "",
-                    }
-                    break
-
-            out.append(details)
-
-        return out[0] if top_n == 1 else out
-
-
-
-
-
     def _clean_display_place_name(self, value: str) -> str:
         s = str(value or "").strip(" ,:-|")
         if not s:
@@ -686,6 +560,9 @@ class IndicPlaces:
         out.setdefault("KERA", "KERALA")
         out.setdefault("JHARKHAND", "JHARKHAND")
         out.setdefault("JHARK", "JHARKHAND")
+        out.setdefault("JHURKHUND", "JHARKHAND")
+        out.setdefault("JHURKHAND", "JHARKHAND")
+        out.setdefault("JHARKHUND", "JHARKHAND")
 
         setattr(self, "_known_state_display_map_cache", out)
         return out
@@ -787,6 +664,401 @@ class IndicPlaces:
 
         return best
 
+    def _repair_ocr_state_variants(self, value: str) -> str:
+        """Repair common OCR noise around Indian state names before address analysis."""
+        s = str(value or "")
+        if not s:
+            return ""
+
+        s = re.sub(r"\\s+", " ", s).strip()
+
+        one_word_states = [
+            "MAHARASHTRA", "KARNATAKA", "TELANGANA", "JHARKHAND",
+            "RAJASTHAN", "GUJARAT", "HARYANA", "ODISHA", "PUNJAB",
+            "KERALA", "BIHAR", "ASSAM", "GOA", "SIKKIM",
+        ]
+
+        for state in sorted(one_word_states, key=len, reverse=True):
+            s = re.sub(
+                rf"(?i)({state})(?=[A-Z])",
+                lambda m: m.group(1).upper() + " ",
+                s,
+            )
+
+        replacements = [
+            # Jharkhand OCR/vowel variants.
+            (r"(?i)JHURKHUND", "JHARKHAND"),
+            (r"(?i)JHURKHAND", "JHARKHAND"),
+            (r"(?i)JHARKHUND", "JHARKHAND"),
+            (r"(?i)JHARKHAND", "JHARKHAND"),
+            (r"(?i)JHARKAND", "JHARKHAND"),
+            (r"(?i)JHARHAND", "JHARKHAND"),
+            (r"(?i)\\bT[A-Z]{0,4}MIL\\s*NADU\\b", "TAMIL NADU"),
+            (r"(?i)T[A-Z]{0,4}MILNADU", "TAMIL NADU"),
+            (r"(?i)TAMILNADU", "TAMIL NADU"),
+            (r"(?i)TMLNADU", "TAMIL NADU"),
+            (r"(?i)MADHYAPRADESH", "MADHYA PRADESH"),
+            (r"(?i)UTTARPRADESH", "UTTAR PRADESH"),
+            (r"(?i)ANDHRAPRADESH", "ANDHRA PRADESH"),
+            (r"(?i)ARUNACHALPRADESH", "ARUNACHAL PRADESH"),
+            (r"(?i)HIMACHALPRADESH", "HIMACHAL PRADESH"),
+        ]
+
+        for pattern, repl in replacements:
+            s = re.sub(pattern, repl, s)
+
+        for state in sorted(one_word_states, key=len, reverse=True):
+            s = re.sub(
+                rf"(?i)({state})(?=[A-Z])",
+                lambda m: m.group(1).upper() + " ",
+                s,
+            )
+
+        return re.sub(r"\\s+", " ", s).strip()
+
+
+
+    def _repair_strip_office_suffix(self, value: str) -> str:
+        s = str(value or "").strip(" ,:-|")
+        if not s:
+            return ""
+        s = re.sub(
+            r"(?i)\s+\b(?:G\.?P\.?O\.?|H\.?O\.?|S\.?O\.?|B\.?O\.?|P\.?O\.?|GPO|HO|SO|BO|PO)$",
+            "",
+            s,
+        )
+        return re.sub(r"\s+", " ", s).strip(" ,:-|")
+
+    def _repair_norm(self, value: str) -> str:
+        return normalize_place_name(value).replace(" ", "")
+
+    def _edit_distance_limited(self, a: str, b: str, limit: int = 2) -> int:
+        a = str(a or "")
+        b = str(b or "")
+
+        if a == b:
+            return 0
+
+        if abs(len(a) - len(b)) > limit:
+            return limit + 1
+
+        if len(a) > len(b):
+            a, b = b, a
+
+        prev = list(range(len(b) + 1))
+
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            row_min = i
+
+            for j, cb in enumerate(b, 1):
+                cost = 0 if ca == cb else 1
+                val = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                cur.append(val)
+                row_min = min(row_min, val)
+
+            if row_min > limit:
+                return limit + 1
+
+            prev = cur
+
+        return prev[-1]
+
+    def _repair_candidate_rows(self) -> list[dict]:
+        cached = getattr(self, "_repair_candidate_rows_cache", None)
+        if cached is not None:
+            return cached
+
+        rows = []
+        seen = set()
+
+        for rec in getattr(self, "records", []):
+            state = str(rec.get("state", "") or "").strip()
+            district = str(rec.get("district", "") or "").strip()
+            pincode = str(rec.get("pincode", "") or "").strip()
+
+            candidates = [
+                ("name", self._repair_strip_office_suffix(rec.get("name", "")), 20),
+                ("district", district, 70),
+                ("state", state, 90),
+            ]
+
+            for kind, name, base_weight in candidates:
+                name = str(name or "").strip()
+                norm = self._repair_norm(name)
+
+                if len(norm) < 4:
+                    continue
+
+                if norm in {"NONE", "NULL", "NIL", "NAN", "NA"}:
+                    continue
+
+                key = (norm, self._repair_norm(state), self._repair_norm(district), kind)
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                rows.append({
+                    "name": name,
+                    "norm": norm,
+                    "kind": kind,
+                    "state": state,
+                    "district": district,
+                    "pincode": pincode,
+                    "base_weight": base_weight,
+                })
+
+        aliases = [
+            ("Kerala", "KERALA", "", "", "state", 120),
+            ("Jharkhand", "JHARKHAND", "", "", "state", 120),
+            ("Maharashtra", "MAHARASHTRA", "", "", "state", 120),
+            ("Tamil Nadu", "TAMIL NADU", "", "", "state", 120),
+            ("Madhya Pradesh", "MADHYA PRADESH", "", "", "state", 120),
+            ("Uttar Pradesh", "UTTAR PRADESH", "", "", "state", 120),
+            ("Andhra Pradesh", "ANDHRA PRADESH", "", "", "state", 120),
+        ]
+
+        for name, state, district, pincode, kind, base_weight in aliases:
+            norm = self._repair_norm(name)
+            key = (norm, self._repair_norm(state), self._repair_norm(district), kind)
+            if key not in seen:
+                seen.add(key)
+                rows.append({
+                    "name": name,
+                    "norm": norm,
+                    "kind": kind,
+                    "state": state,
+                    "district": district,
+                    "pincode": pincode,
+                    "base_weight": base_weight,
+                })
+
+
+        # Include user/package custom places in correction candidates.
+        # This allows missing villages/localities to participate in correct_place_name().
+        try:
+            from importlib import resources as _indic_places_resources
+            _custom_file = _indic_places_resources.files("indic_places").joinpath("data/custom_places.txt")
+            _custom_text = _custom_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            _custom_text = ""
+
+        for _line in _custom_text.splitlines():
+            _name = _line.split("#", 1)[0].strip()
+            if not _name:
+                continue
+
+            _norm = self._repair_norm(_name)
+            if len(_norm) < 4:
+                continue
+
+            _key = (_norm, "", "", "custom")
+            if _key in seen:
+                continue
+
+            seen.add(_key)
+            rows.append({
+                "name": _name,
+                "norm": _norm,
+                "kind": "custom",
+                "state": "",
+                "district": "",
+                "pincode": "",
+                "base_weight": 85,
+            })
+
+
+        setattr(self, "_repair_candidate_rows_cache", rows)
+        return rows
+
+    def _repair_candidate_score(
+        self,
+        query_norm: str,
+        row: dict,
+        state_hint: str = "",
+        district_hint: str = "",
+        max_edit: int = 2,
+    ) -> float:
+        cand_norm = row["norm"]
+
+        if not query_norm or not cand_norm:
+            return -1
+
+        sim = SequenceMatcher(None, query_norm, cand_norm).ratio()
+        edit = self._edit_distance_limited(query_norm, cand_norm, limit=max_edit)
+
+        is_prefix = cand_norm.startswith(query_norm)
+        is_reverse_prefix = query_norm.startswith(cand_norm)
+        is_contains = query_norm in cand_norm or cand_norm in query_norm
+        is_close_edit = edit <= max_edit
+        is_similar = sim >= 0.72
+
+        if not (is_prefix or is_reverse_prefix or is_contains or is_close_edit or is_similar):
+            return -1
+
+        score = 0.0
+        score += sim * 100
+        score += float(row.get("base_weight", 0) or 0)
+
+        if cand_norm == query_norm:
+            score += 80
+
+        if is_prefix and len(cand_norm) > len(query_norm):
+            missing = len(cand_norm) - len(query_norm)
+            score += max(10, 90 - missing * 8)
+
+        if is_close_edit:
+            score += 75 - edit * 18
+
+        if is_contains:
+            score += 20
+
+        if len(cand_norm) > 1 and cand_norm[1:].startswith(query_norm[: min(len(query_norm), len(cand_norm) - 1)]):
+            score += 35
+
+        state_hint_norm = self._repair_norm(state_hint)
+        district_hint_norm = self._repair_norm(district_hint)
+
+        if state_hint_norm and self._repair_norm(row.get("state", "")) == state_hint_norm:
+            score += 35
+
+        if district_hint_norm and self._repair_norm(row.get("district", "")) == district_hint_norm:
+            score += 50
+
+        name = str(row.get("name", "") or "")
+        if re.search(r"(?i)\b(?:G\.?P\.?O\.?|H\.?O\.?|S\.?O\.?|B\.?O\.?|P\.?O\.?|GPO|HO|SO|BO|PO)$", name):
+            score -= 60
+
+        return score
+
+    def correct_place_name(
+        self,
+        query: str,
+        state_hint: str = "",
+        district_hint: str = "",
+        top_n: int = 1,
+        max_edit: int = 2,
+    ):
+        query = str(query or "").strip()
+
+        if not query:
+            return [] if top_n != 1 else ""
+
+        try:
+            query = self._repair_ocr_state_variants(query)
+        except Exception:
+            pass
+
+        query_norm = self._repair_norm(query)
+
+        rows = self._repair_candidate_rows()
+        scored = []
+
+        for row in rows:
+            score = self._repair_candidate_score(
+                query_norm,
+                row,
+                state_hint=state_hint,
+                district_hint=district_hint,
+                max_edit=max_edit,
+            )
+
+            if score < 0:
+                continue
+
+            scored.append((score, len(row["norm"]), row["name"], row))
+
+        scored.sort(key=lambda x: (-x[0], x[1], x[2].lower()))
+
+        out = []
+        seen = set()
+
+        for score, _length, _name, row in scored:
+            if score < 120:
+                continue
+
+            clean = self._repair_strip_office_suffix(row["name"])
+            key = self._repair_norm(clean)
+
+            if not key or key in seen:
+                continue
+
+            seen.add(key)
+            out.append(clean)
+
+            if len(out) >= max(int(top_n or 1), 1):
+                break
+
+        if top_n == 1:
+            return out[0] if out else query
+
+        return out
+
+    def correct_place(
+        self,
+        query: str,
+        state_hint: str = "",
+        district_hint: str = "",
+        top_n: int = 1,
+        max_edit: int = 2,
+    ):
+        names = self.correct_place_name(
+            query,
+            state_hint=state_hint,
+            district_hint=district_hint,
+            top_n=top_n,
+            max_edit=max_edit,
+        )
+
+        if isinstance(names, str):
+            name_list = [names] if names else []
+        else:
+            name_list = names
+
+        rows = self._repair_candidate_rows()
+        output = []
+
+        for name in name_list:
+            name_norm = self._repair_norm(name)
+
+            best = None
+            best_score = -1
+
+            for row in rows:
+                if row["norm"] != name_norm:
+                    continue
+
+                score = row.get("base_weight", 0) or 0
+
+                if self._repair_norm(state_hint) and self._repair_norm(row.get("state", "")) == self._repair_norm(state_hint):
+                    score += 40
+
+                if self._repair_norm(district_hint) and self._repair_norm(row.get("district", "")) == self._repair_norm(district_hint):
+                    score += 60
+
+                if score > best_score:
+                    best_score = score
+                    best = row
+
+            if best:
+                output.append({
+                    "name": name,
+                    "state": best.get("state", ""),
+                    "district": best.get("district", ""),
+                    "pincode": best.get("pincode", ""),
+                })
+            else:
+                output.append({
+                    "name": name,
+                    "state": "",
+                    "district": "",
+                    "pincode": "",
+                })
+
+        return output[0] if top_n == 1 else output
+
+
     def analyze_address(
         self,
         address: str,
@@ -795,6 +1067,7 @@ class IndicPlaces:
         include_tokens: bool = True,
         top_n: int = 1,
     ) -> dict:
+        address = self._repair_ocr_state_variants(address)
         raw_address = str(address or "").strip()
 
         if not raw_address:
@@ -1128,7 +1401,12 @@ class IndicPlaces:
         segmented = " ".join(tokens)
         return SegmentResult(original=original, segmented=segmented, tokens=tokens, known_tokens=dp[0][2])
 
-    def normalize_address_spacing(self, text: str) -> str:
+    def normalize_address_spacing(self, text, *args, **kwargs):
+        repaired = self._repair_ocr_state_variants(text)
+        out = self._normalize_address_spacing_raw(repaired, *args, **kwargs)
+        return self._repair_ocr_state_variants(out)
+
+    def _normalize_address_spacing_raw(self, text: str) -> str:
         # Data-driven OCR address spacing.
         # Address terms are loaded from indic_places/data/address_terms.txt.
         # Extra corpus place aliases are loaded from indic_places/data/custom_places.txt.
