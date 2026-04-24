@@ -1,18 +1,14 @@
-"""
-indic_places — Indian Place Name Identifier & Fuzzy Lookup Library
-==================================================================
-Usage:
-    from indic_places import IndicPlaces
+"""Indian place-name identifier and OCR word segmentation library."""
 
-    ip = IndicPlaces()
-    results = ip.lookup("Bangalor")          # fuzzy match
-    results = ip.lookup("Mumbai", kind="city")
-    tags    = ip.tag("I live in Banglore near Koramanagala")
-    info    = ip.info("Maharashtra")
-"""
+from .core import IndicPlaces, PlaceResult, SegmentResult, TaggedPlace, normalize_place_name, normalize_text
 
-from .core import IndicPlaces
-from .tagger import PlaceTagger
+__version__ = "1.1.0"
 
-__version__ = "1.0.0"
-__all__ = ["IndicPlaces", "PlaceTagger"]
+__all__ = [
+    "IndicPlaces",
+    "PlaceResult",
+    "SegmentResult",
+    "TaggedPlace",
+    "normalize_place_name",
+    "normalize_text",
+]
