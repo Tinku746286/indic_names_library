@@ -21,13 +21,13 @@ python -m pip install --no-cache-dir --upgrade --force-reinstall indic-places
 Install a specific version:
 
 ```bash
-python -m pip install indic-places==1.1.4
+python -m pip install indic-places==1.1.5
 ```
 
 Add to `requirements.txt`:
 
 ```text
-indic-places>=1.1.4
+indic-places>=1.1.5
 ```
 
 ## Import
@@ -143,7 +143,7 @@ def get_place_engine():
     return _PLACE_ENGINE
 
 
-def normalize_borrower_address(address: str) -> str:
+def normalize_address(address: str) -> str:
     address = " ".join(str(address or "").split()).strip(" ,:-|")
 
     if not address:
@@ -151,15 +151,6 @@ def normalize_borrower_address(address: str) -> str:
 
     engine = get_place_engine()
     return engine.normalize_address_spacing(address)
-```
-
-Example:
-
-```python
-borrower_address = "PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586"
-borrower_address = normalize_borrower_address(borrower_address)
-
-print(borrower_address)
 ```
 
 ## Use with an Existing Extractor Function
@@ -192,7 +183,7 @@ def evaluate_and_store_address(candidate: str):
     if not candidate:
         return False
 
-    # store candidate in your output dictionary/model
+    # Store candidate in your output dictionary/model.
     return True
 ```
 
