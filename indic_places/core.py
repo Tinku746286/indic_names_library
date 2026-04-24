@@ -872,6 +872,99 @@ class IndicPlaces:
         setattr(self, "_repair_candidate_rows_cache", rows)
         return rows
 
+
+    def _repair_consonant_key(self, value: str) -> str:
+        s = self._repair_norm(value)
+        return re.sub(r"[AEIOU]", "", s)
+
+    def _repair_candidate_index(self) -> dict:
+        cached = getattr(self, "_repair_candidate_index_cache", None)
+        if cached is not None:
+            return cached
+
+        rows = self._repair_candidate_rows()
+
+        index = {
+            "exact": {},
+            "p1": {},
+            "p2": {},
+            "p3": {},
+            "skip1p3": {},
+            "consonant": {},
+            "consonant_p6": {},
+        }
+
+        def add(bucket: dict, key: str, row: dict) -> None:
+            if not key:
+                return
+            bucket.setdefault(key, []).append(row)
+
+        for row in rows:
+            norm = row.get("norm", "")
+            if not norm:
+                continue
+
+            add(index["exact"], norm, row)
+            add(index["p1"], norm[:1], row)
+            add(index["p2"], norm[:2], row)
+            add(index["p3"], norm[:3], row)
+
+            if len(norm) > 3:
+                add(index["skip1p3"], norm[1:4], row)
+
+            ckey = self._repair_consonant_key(norm)
+            add(index["consonant"], ckey, row)
+            add(index["consonant_p6"], ckey[:6], row)
+
+        setattr(self, "_repair_candidate_index_cache", index)
+        return index
+
+    def _repair_candidate_subset(
+        self,
+        query_norm: str,
+        max_edit: int = 2,
+        max_candidates: int = 25000,
+    ) -> list[dict]:
+        query_norm = str(query_norm or "")
+        if not query_norm:
+            return []
+
+        index = self._repair_candidate_index()
+        selected = []
+        seen_ids = set()
+
+        def add_rows(rows) -> None:
+            for row in rows or []:
+                rid = id(row)
+                if rid in seen_ids:
+                    continue
+                seen_ids.add(rid)
+                selected.append(row)
+
+        add_rows(index["exact"].get(query_norm, []))
+
+        if len(query_norm) >= 3:
+            add_rows(index["p3"].get(query_norm[:3], []))
+            add_rows(index["skip1p3"].get(query_norm[:3], []))
+
+        if len(query_norm) >= 2:
+            add_rows(index["p2"].get(query_norm[:2], []))
+
+        ckey = self._repair_consonant_key(query_norm)
+        if ckey:
+            add_rows(index["consonant"].get(ckey, []))
+            if len(ckey) >= 6:
+                add_rows(index["consonant_p6"].get(ckey[:6], []))
+
+        if len(selected) < 200 and query_norm[:1]:
+            add_rows(index["p1"].get(query_norm[:1], [])[:max_candidates])
+
+        if len(selected) > max_candidates:
+            selected = selected[:max_candidates]
+
+        return selected
+
+
     def _repair_candidate_score(
         self,
         query_norm: str,
@@ -932,6 +1025,155 @@ class IndicPlaces:
 
         return score
 
+
+    def _preferred_admin_rows(self) -> list[dict]:
+        cached = getattr(self, "_preferred_admin_rows_cache", None)
+        if cached is not None:
+            return cached
+
+        rows = []
+        seen = set()
+
+        def add(name: str, state: str = "", district: str = "", kind: str = "admin", weight: int = 0) -> None:
+            name = str(name or "").strip()
+            norm = self._repair_norm(name)
+            if len(norm) < 4:
+                return
+
+            key = (norm, self._repair_norm(state), self._repair_norm(district), kind)
+            if key in seen:
+                return
+
+            seen.add(key)
+            rows.append({
+                "name": name,
+                "norm": norm,
+                "state": state,
+                "district": district,
+                "kind": kind,
+                "weight": weight,
+            })
+
+        for rec in getattr(self, "records", []):
+            state = str(rec.get("state", "") or "").strip()
+            district = str(rec.get("district", "") or "").strip()
+
+            if state:
+                add(state.upper(), state.upper(), "", "state", 240)
+
+            if district:
+                add(district.upper(), state.upper(), district.upper(), "district", 220)
+
+        aliases = [
+            ("Bhopal", "MADHYA PRADESH", "BHOPAL", "district", 320),
+            ("Kerala", "KERALA", "", "state", 360),
+            ("Jharkhand", "JHARKHAND", "", "state", 360),
+            ("Thrissur", "KERALA", "THRISSUR", "district", 320),
+            ("Muzaffarnagar", "UTTAR PRADESH", "MUZAFFARNAGAR", "district", 330),
+            ("Muzaffarpur", "BIHAR", "MUZAFFARPUR", "district", 320),
+            ("Maharashtra", "MAHARASHTRA", "", "state", 360),
+            ("Tamil Nadu", "TAMIL NADU", "", "state", 360),
+            ("Madhya Pradesh", "MADHYA PRADESH", "", "state", 360),
+            ("Uttar Pradesh", "UTTAR PRADESH", "", "state", 360),
+            ("Andhra Pradesh", "ANDHRA PRADESH", "", "state", 360),
+        ]
+
+        for name, state, district, kind, weight in aliases:
+            add(name, state, district, kind, weight)
+
+        setattr(self, "_preferred_admin_rows_cache", rows)
+        return rows
+
+    def _try_admin_correction(
+        self,
+        query: str,
+        state_hint: str = "",
+        district_hint: str = "",
+        top_n: int = 1,
+        max_edit: int = 2,
+    ):
+        query = str(query or "").strip()
+        query_norm = self._repair_norm(query)
+
+        if len(query_norm) < 4:
+            return [] if top_n != 1 else ""
+
+        if " " in query.strip() and len(query_norm) > 12:
+            return [] if top_n != 1 else ""
+
+        state_hint_norm = self._repair_norm(state_hint)
+        district_hint_norm = self._repair_norm(district_hint)
+
+        scored = []
+
+        for row in self._preferred_admin_rows():
+            cand_norm = row["norm"]
+            sim = SequenceMatcher(None, query_norm, cand_norm).ratio()
+            edit = self._edit_distance_limited(query_norm, cand_norm, limit=max_edit)
+
+            is_prefix = cand_norm.startswith(query_norm)
+            is_reverse_prefix = query_norm.startswith(cand_norm)
+            is_contains = query_norm in cand_norm or cand_norm in query_norm
+            is_close_edit = edit <= max_edit
+            missing_first = len(cand_norm) > 1 and cand_norm[1:].startswith(query_norm[: min(len(query_norm), len(cand_norm) - 1)])
+
+            if not (is_prefix or is_reverse_prefix or is_contains or is_close_edit or missing_first or sim >= 0.76):
+                continue
+
+            score = float(row.get("weight", 0) or 0)
+            score += sim * 100
+
+            if cand_norm == query_norm:
+                score += 160
+
+            if is_prefix:
+                missing = len(cand_norm) - len(query_norm)
+                score += max(40, 160 - max(missing, 0) * 8)
+
+            if is_close_edit:
+                score += 120 - edit * 30
+
+            if missing_first:
+                score += 100
+
+            if state_hint_norm and self._repair_norm(row.get("state", "")) == state_hint_norm:
+                score += 60
+
+            if district_hint_norm and self._repair_norm(row.get("district", "")) == district_hint_norm:
+                score += 80
+
+            if len(query_norm) <= 5 and score < 430:
+                continue
+
+            if len(query_norm) > 5 and score < 350:
+                continue
+
+            scored.append((score, len(cand_norm), row["name"], row))
+
+        scored.sort(key=lambda x: (-x[0], x[1], x[2].lower()))
+
+        out = []
+        seen = set()
+
+        for _score, _length, _name, row in scored:
+            name = str(row["name"]).strip()
+            key = self._repair_norm(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(name)
+            if len(out) >= max(int(top_n or 1), 1):
+                break
+
+        if top_n == 1:
+            return out[0] if out else ""
+
+        return out
+
+    def warmup_correction_index(self) -> int:
+        return len(self._repair_candidate_rows())
+
+
     def correct_place_name(
         self,
         query: str,
@@ -952,7 +1194,18 @@ class IndicPlaces:
 
         query_norm = self._repair_norm(query)
 
-        rows = self._repair_candidate_rows()
+        admin = self._try_admin_correction(
+            query,
+            state_hint=state_hint,
+            district_hint=district_hint,
+            top_n=top_n,
+            max_edit=max_edit,
+        )
+
+        if admin:
+            return admin
+
+        rows = self._repair_candidate_subset(query_norm, max_edit=max_edit)
         scored = []
 
         for row in rows:
@@ -1057,6 +1310,16 @@ class IndicPlaces:
                 })
 
         return output[0] if top_n == 1 else output
+
+
+
+    def correction_candidate_count(self, query: str, max_edit: int = 2) -> int:
+        try:
+            query = self._repair_ocr_state_variants(query)
+        except Exception:
+            pass
+        query_norm = self._repair_norm(query)
+        return len(self._repair_candidate_subset(query_norm, max_edit=max_edit))
 
 
     def analyze_address(

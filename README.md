@@ -492,3 +492,35 @@ This improves village-level matching and correction, for example:
 ip.correct_place_name("DORA CHHAPR")
 ip.correct_place_name("MOHAN CHHAPR")
 ```
+
+### Fast correction index
+
+`correct_place_name()` uses an in-memory candidate index so it does not scan every village/place name for every query.
+
+This improves correction speed after adding large all-India village vocabulary data.
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+print(ip.correct_place_name("DORA CHHAPR"))
+print(ip.correction_candidate_count("DORA CHHAPR"))
+```
+
+### Faster and safer correction
+
+`correct_place_name()` first checks a fast administrative-name index for common states/districts/cities, then falls back to the larger village/place index.
+
+This prevents short local aliases like `Bhopa`, `Kera`, or `Jharka` from beating common outputs like `Bhopal`, `Kerala`, and `Jharkhand`.
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+print(ip.correct_place_name("bhop"))       # Bhopal
+print(ip.correct_place_name("kera"))       # Kerala
+print(ip.correct_place_name("jhark"))      # Jharkhand
+print(ip.correct_place_name("hrissu"))     # Thrissur
+```
