@@ -524,3 +524,13 @@ print(ip.correct_place_name("kera"))       # Kerala
 print(ip.correct_place_name("jhark"))      # Jharkhand
 print(ip.correct_place_name("hrissu"))     # Thrissur
 ```
+
+### South India subdistrict, village, and locality vocabulary
+
+South Indian subdistrict, village, post-office, locality, colony, and area names can be imported into:
+
+```text
+indic_places/data/custom_places.txt
+```
+
+The importer keeps only unique names and filters rows to South Indian states/UTs by state column when available.
