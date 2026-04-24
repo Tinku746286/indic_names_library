@@ -552,3 +552,27 @@ Raw downloaded source files should stay ignored under:
 ```text
 data/kerala_lgd_input/
 ```
+
+### Multi-state LGD locality vocabulary
+
+Multiple LGD state downloads can be imported at once. The importer extracts unique district, subdistrict, block, village, panchayat, urban local body, traditional local body, and ward-style names.
+
+Default states:
+
+```text
+TAMIL NADU, KARNATAKA, ANDHRA PRADESH, TELANGANA, PUDUCHERRY
+```
+
+Output files:
+
+```text
+data/multi_state_lgd_names_unique.txt
+data/multi_state_lgd_names_full.csv.gz
+indic_places/data/custom_places.txt
+```
+
+Raw downloaded source files should stay ignored under:
+
+```text
+data/multi_state_lgd_input/
+```
