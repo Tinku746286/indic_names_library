@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "indic-places"
-version = "1.1.5"
-description = "Indian place name identifier with SymSpell-style fuzzy lookup and OCR word segmentation"
+version = "1.1.6"
+description = "Indian place-name lookup, OCR address cleanup, and merged-word address segmentation"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
