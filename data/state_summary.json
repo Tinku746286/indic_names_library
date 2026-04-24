@@ -1,0 +1,261 @@
+[
+  {
+    "state": "ANDAMAN AND NICOBAR ISLANDS",
+    "total_offices": 100,
+    "unique_names": 100,
+    "districts": 3,
+    "pincodes": 22
+  },
+  {
+    "state": "ANDHRA PRADESH",
+    "total_offices": 10681,
+    "unique_names": 9515,
+    "districts": 26,
+    "pincodes": 1262
+  },
+  {
+    "state": "ARUNACHAL PRADESH",
+    "total_offices": 1171,
+    "unique_names": 1163,
+    "districts": 25,
+    "pincodes": 51
+  },
+  {
+    "state": "ASSAM",
+    "total_offices": 4063,
+    "unique_names": 3926,
+    "districts": 34,
+    "pincodes": 577
+  },
+  {
+    "state": "BIHAR",
+    "total_offices": 9309,
+    "unique_names": 8270,
+    "districts": 38,
+    "pincodes": 883
+  },
+  {
+    "state": "CHANDIGARH",
+    "total_offices": 53,
+    "unique_names": 53,
+    "districts": 1,
+    "pincodes": 23
+  },
+  {
+    "state": "CHHATTISGARH",
+    "total_offices": 4411,
+    "unique_names": 4030,
+    "districts": 28,
+    "pincodes": 279
+  },
+  {
+    "state": "DELHI",
+    "total_offices": 550,
+    "unique_names": 550,
+    "districts": 11,
+    "pincodes": 103
+  },
+  {
+    "state": "GOA",
+    "total_offices": 261,
+    "unique_names": 257,
+    "districts": 2,
+    "pincodes": 89
+  },
+  {
+    "state": "GUJARAT",
+    "total_offices": 8841,
+    "unique_names": 7849,
+    "districts": 33,
+    "pincodes": 1010
+  },
+  {
+    "state": "HARYANA",
+    "total_offices": 2706,
+    "unique_names": 2652,
+    "districts": 22,
+    "pincodes": 318
+  },
+  {
+    "state": "HIMACHAL PRADESH",
+    "total_offices": 2807,
+    "unique_names": 2679,
+    "districts": 12,
+    "pincodes": 439
+  },
+  {
+    "state": "JAMMU AND KASHMIR",
+    "total_offices": 1617,
+    "unique_names": 1593,
+    "districts": 20,
+    "pincodes": 213
+  },
+  {
+    "state": "JHARKHAND",
+    "total_offices": 4584,
+    "unique_names": 4357,
+    "districts": 24,
+    "pincodes": 388
+  },
+  {
+    "state": "KARNATAKA",
+    "total_offices": 9658,
+    "unique_names": 8844,
+    "districts": 31,
+    "pincodes": 1359
+  },
+  {
+    "state": "KERALA",
+    "total_offices": 5057,
+    "unique_names": 4968,
+    "districts": 14,
+    "pincodes": 1428
+  },
+  {
+    "state": "LADAKH",
+    "total_offices": 119,
+    "unique_names": 119,
+    "districts": 2,
+    "pincodes": 14
+  },
+  {
+    "state": "LAKSHADWEEP",
+    "total_offices": 10,
+    "unique_names": 10,
+    "districts": 1,
+    "pincodes": 9
+  },
+  {
+    "state": "MADHYA PRADESH",
+    "total_offices": 10272,
+    "unique_names": 9365,
+    "districts": 52,
+    "pincodes": 778
+  },
+  {
+    "state": "MAHARASHTRA",
+    "total_offices": 13762,
+    "unique_names": 11876,
+    "districts": 36,
+    "pincodes": 1600
+  },
+  {
+    "state": "MANIPUR",
+    "total_offices": 784,
+    "unique_names": 781,
+    "districts": 16,
+    "pincodes": 55
+  },
+  {
+    "state": "MEGHALAYA",
+    "total_offices": 929,
+    "unique_names": 923,
+    "districts": 11,
+    "pincodes": 71
+  },
+  {
+    "state": "MIZORAM",
+    "total_offices": 456,
+    "unique_names": 455,
+    "districts": 11,
+    "pincodes": 44
+  },
+  {
+    "state": "NA",
+    "total_offices": 715,
+    "unique_names": 709,
+    "districts": 1,
+    "pincodes": 338
+  },
+  {
+    "state": "NAGALAND",
+    "total_offices": 403,
+    "unique_names": 403,
+    "districts": 12,
+    "pincodes": 46
+  },
+  {
+    "state": "ODISHA",
+    "total_offices": 8915,
+    "unique_names": 8198,
+    "districts": 30,
+    "pincodes": 943
+  },
+  {
+    "state": "PUDUCHERRY",
+    "total_offices": 95,
+    "unique_names": 95,
+    "districts": 4,
+    "pincodes": 33
+  },
+  {
+    "state": "PUNJAB",
+    "total_offices": 3796,
+    "unique_names": 3609,
+    "districts": 23,
+    "pincodes": 531
+  },
+  {
+    "state": "RAJASTHAN",
+    "total_offices": 11032,
+    "unique_names": 10288,
+    "districts": 33,
+    "pincodes": 1017
+  },
+  {
+    "state": "SIKKIM",
+    "total_offices": 212,
+    "unique_names": 210,
+    "districts": 6,
+    "pincodes": 19
+  },
+  {
+    "state": "TAMIL NADU",
+    "total_offices": 11733,
+    "unique_names": 10992,
+    "districts": 38,
+    "pincodes": 2049
+  },
+  {
+    "state": "TELANGANA",
+    "total_offices": 6253,
+    "unique_names": 5429,
+    "districts": 33,
+    "pincodes": 692
+  },
+  {
+    "state": "THE DADRA AND NAGAR HAVELI AND DAMAN AND DIU",
+    "total_offices": 52,
+    "unique_names": 52,
+    "districts": 3,
+    "pincodes": 10
+  },
+  {
+    "state": "TRIPURA",
+    "total_offices": 723,
+    "unique_names": 719,
+    "districts": 8,
+    "pincodes": 79
+  },
+  {
+    "state": "UTTAR PRADESH",
+    "total_offices": 17968,
+    "unique_names": 15877,
+    "districts": 75,
+    "pincodes": 1668
+  },
+  {
+    "state": "UTTARAKHAND",
+    "total_offices": 2742,
+    "unique_names": 2639,
+    "districts": 13,
+    "pincodes": 305
+  },
+  {
+    "state": "WEST BENGAL",
+    "total_offices": 8787,
+    "unique_names": 8116,
+    "districts": 23,
+    "pincodes": 1131
+  }
+]
