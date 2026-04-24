@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "indic-places"
+version = "1.0.0"
+description = "Indian place name identifier with fuzzy (SymSpell-style) lookup — cities, states, villages, roads, areas, landmarks"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Tinku", email = "Tinku746286@github.com" }]
+keywords = ["india", "places", "nlp", "fuzzy", "geocoding", "city", "village", "state", "address"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+requires-python = ">=3.8"
+dependencies = []   # zero runtime dependencies!
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[project.scripts]
+indic-places = "indic_places.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Tinku746286/indic_names_library"
+Repository = "https://github.com/Tinku746286/indic_names_library"
+Issues = "https://github.com/Tinku746286/indic_names_library/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["indic_places*"]
+
+[tool.setuptools.package-data]
+indic_places = ["data/*.json"]
