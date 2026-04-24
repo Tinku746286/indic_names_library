@@ -2,7 +2,7 @@
 
 Indian place-name lookup, fuzzy matching, OCR address spacing, and merged-word segmentation for Python.
 
-This library is mainly built for Indian OCR/address extraction work, especially sanction-letter extraction pipelines where borrower addresses often come from scanned PDFs and OCR output.
+This package is designed for public use in Indian address processing, OCR cleanup, place-name identification, and document extraction workflows.
 
 ## Install from PyPI
 
@@ -72,7 +72,7 @@ PILASSERY ADIVARAM PUTHUPPADI ADIVARAM PUDUPADI KATTIPARA ADIVARAM THAMARASSERY 
 
 ## What This Library Solves
 
-OCR often returns Indian addresses like this:
+OCR often returns Indian addresses as merged text:
 
 ```text
 PILASSERYADIVARAMPUTHUPPADIADIVARAM
@@ -92,146 +92,108 @@ THAMARASSERYKOZHIKODE
 - India-wide GeoNames and postal vocabulary
 - Runtime OCR/custom place aliases from `indic_places/data/custom_places.txt`
 
-## Use in Your Project: SureCreditSanction Engine
+## Use in Any Python Project
 
-Your project is a sanction-letter extraction system. It extracts fields such as borrower address, borrower name, branch name/code, regional office, sanction date/reference, period of limit, and validity of sanction.
-
-For this project, `indic-places` should be used at the final borrower-address cleanup stage.
-
-### Install in SureCreditSanction Engine
+### 1. Install
 
 ```bash
-cd "C:\Users\KUMAR TINKU\Downloads\SureCreditSanction-Engine\SureCreditSanction-Engine\sure_sanction"
-.venv\Scripts\activate
 python -m pip install --upgrade indic-places
 ```
 
-Check installed version:
-
-```bash
-python -c "import importlib.metadata as m; print(m.version('indic-places'))"
-```
-
-### Add Import in Extractor File
-
-Add this near the top of the file where borrower address extraction is implemented:
-
-```python
-try:
-    from indic_places import IndicPlaces
-except Exception:
-    IndicPlaces = None
-```
-
-### Add Lazy Loader
-
-Do not create `IndicPlaces()` inside every function call. Load it once.
-
-```python
-_INDIC_PLACE_ENGINE = None
-_INDIC_PLACE_ENGINE_FAILED = False
-
-
-def _get_indic_place_engine():
-    global _INDIC_PLACE_ENGINE, _INDIC_PLACE_ENGINE_FAILED
-
-    if _INDIC_PLACE_ENGINE_FAILED:
-        return None
-
-    if _INDIC_PLACE_ENGINE is None:
-        if IndicPlaces is None:
-            _INDIC_PLACE_ENGINE_FAILED = True
-            return None
-
-        try:
-            _INDIC_PLACE_ENGINE = IndicPlaces()
-        except Exception:
-            _INDIC_PLACE_ENGINE_FAILED = True
-            return None
-
-    return _INDIC_PLACE_ENGINE
-
-
-def _normalize_address_with_indic_places(address):
-    s = str(address or "").strip()
-    if not s:
-        return ""
-
-    engine = _get_indic_place_engine()
-    if engine is None:
-        return s
-
-    try:
-        fixed = engine.normalize_address_spacing(s)
-        return " ".join(str(fixed or s).split())
-    except Exception:
-        return s
-```
-
-### Use in `_finalize_address`
-
-Call the library during final address cleanup:
-
-```python
-def _finalize_address(s):
-    if not s:
-        return ""
-
-    s = str(s).strip()
-    s = _normalize_address_with_indic_places(s)
-
-    return " ".join(s.split()).strip(" ,:-|")
-```
-
-### Important for `get_borrower_address()`
-
-If your `get_borrower_address()` function has early returns, call `_finalize_address(cand)` inside `_evaluate_and_store()` before storing `best_address`.
-
-```python
-def _evaluate_and_store(cand, current_source):
-    nonlocal best_address, source
-
-    if not cand:
-        return False
-
-    cand = _clean_addr_value(cand)
-
-    # Important: normalize before best_address is stored.
-    cand = _finalize_address(cand)
-
-    if _is_bad_borrower_address_text(cand) or len(cand.strip()) <= 8:
-        return False
-
-    if not best_address or len(cand) > len(best_address):
-        best_address = cand
-        source = current_source
-
-    return bool(re.search(r"\b\d{6}\b", cand))
-```
-
-## Example: Borrower Address Cleanup
-
-Input:
-
-```python
-borrower_address = "PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586"
-```
-
-Code:
+### 2. Create the Engine Once
 
 ```python
 from indic_places import IndicPlaces
 
-ip = IndicPlaces()
-borrower_address = ip.normalize_address_spacing(borrower_address)
+place_engine = IndicPlaces()
+```
 
-print(borrower_address)
+### 3. Normalize an OCR Address
+
+```python
+raw_address = "PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586"
+
+clean_address = place_engine.normalize_address_spacing(raw_address)
+
+print(clean_address)
 ```
 
 Output:
 
 ```text
 PILASSERY ADIVARAM PUTHUPPADI ADIVARAM PUDUPADI KATTIPARA ADIVARAM THAMARASSERY KOZHIKODE - 673586
+```
+
+## Recommended Integration Pattern for OCR Pipelines
+
+Use the library at the final address-cleanup stage, after your extraction logic has already identified the address candidate.
+
+```python
+from indic_places import IndicPlaces
+
+_PLACE_ENGINE = None
+
+
+def get_place_engine():
+    global _PLACE_ENGINE
+
+    if _PLACE_ENGINE is None:
+        _PLACE_ENGINE = IndicPlaces()
+
+    return _PLACE_ENGINE
+
+
+def normalize_borrower_address(address: str) -> str:
+    address = " ".join(str(address or "").split()).strip(" ,:-|")
+
+    if not address:
+        return ""
+
+    engine = get_place_engine()
+    return engine.normalize_address_spacing(address)
+```
+
+Example:
+
+```python
+borrower_address = "PILASSERYADIVARAMPUTHUPPADIADIVARAM PUDUPADIKATTIPARAADIVARAM THAMARASSERYKOZHIKODE - 673586"
+borrower_address = normalize_borrower_address(borrower_address)
+
+print(borrower_address)
+```
+
+## Use with an Existing Extractor Function
+
+If your project has a final address cleanup function, call `normalize_address_spacing()` inside that final cleanup function.
+
+```python
+from indic_places import IndicPlaces
+
+_PLACE_ENGINE = IndicPlaces()
+
+
+def finalize_address(address: str) -> str:
+    address = " ".join(str(address or "").split()).strip(" ,:-|")
+
+    if not address:
+        return ""
+
+    address = _PLACE_ENGINE.normalize_address_spacing(address)
+
+    return " ".join(address.split()).strip(" ,:-|")
+```
+
+If your extraction function stores the best address candidate before returning, normalize before storing the final value.
+
+```python
+def evaluate_and_store_address(candidate: str):
+    candidate = finalize_address(candidate)
+
+    if not candidate:
+        return False
+
+    # store candidate in your output dictionary/model
+    return True
 ```
 
 ## Lookup Places
@@ -320,7 +282,45 @@ def clean_address(address):
     return _PLACE_ENGINE.normalize_address_spacing(address)
 ```
 
-This loads the place index once and is better for processing thousands or lakhs of documents.
+This loads the place index once and is better for large document batches.
+
+## Data Files
+
+The package includes runtime data files:
+
+```text
+indic_places/data/address_terms.txt
+indic_places/data/custom_places.txt
+indic_places/data/places_index.json.gz
+```
+
+The repository also contains supporting/reference data:
+
+```text
+data/unique_place_names.txt
+data/geonames_india_places_full.csv.gz
+data/by_state_geonames/
+```
+
+## Data Sources and Attribution
+
+This package includes place-name vocabulary derived from open geographical datasets, including GeoNames India gazetteer and postal data.
+
+GeoNames data is licensed under Creative Commons Attribution 4.0. Please credit GeoNames when using data derived from GeoNames.
+
+Suggested attribution:
+
+```text
+This product includes data derived from GeoNames (https://www.geonames.org/), licensed under CC BY 4.0.
+```
+
+The data is provided as-is and may contain spelling variants, alternate names, outdated entries, or OCR-specific aliases.
+
+## Privacy and Project Neutrality
+
+This package is public and project-neutral.
+
+It does not include private project names, private customer data, private document text, or proprietary extraction logic. Use it as a reusable Indian place-name and OCR address cleanup utility.
 
 ## Troubleshooting
 
@@ -331,7 +331,7 @@ python -m pip uninstall indic-places -y
 python -m pip install --no-cache-dir --upgrade --force-reinstall indic-places
 ```
 
-### Check version
+### Check installed version
 
 ```bash
 python -c "import importlib.metadata as m; print(m.version('indic-places'))"
@@ -345,7 +345,7 @@ python -m indic_places.cli stats
 
 ### Works locally but not after pip install
 
-Make sure these package data files are included:
+Make sure package data files are included in the published wheel:
 
 ```text
 MANIFEST.in
