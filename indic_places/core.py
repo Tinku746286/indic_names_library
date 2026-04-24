@@ -651,6 +651,295 @@ class IndicPlaces:
         return out[0] if top_n == 1 else out
 
 
+
+
+
+    def _clean_display_place_name(self, value: str) -> str:
+        s = str(value or "").strip(" ,:-|")
+        if not s:
+            return ""
+
+        s = re.sub(
+            r"(?i)\s+\b(?:G\.?P\.?O\.?|H\.?O\.?|S\.?O\.?|B\.?O\.?|P\.?O\.?|GPO|HO|SO|BO|PO)$",
+            "",
+            s,
+        )
+        return re.sub(r"\s+", " ", s).strip(" ,:-|")
+
+    def _known_state_display_map(self) -> dict:
+        cached = getattr(self, "_known_state_display_map_cache", None)
+        if cached is not None:
+            return cached
+
+        out = {}
+        for rec in self.records:
+            state = str(rec.get("state", "") or "").strip()
+            if state:
+                out[normalize_place_name(state).replace(" ", "")] = state.upper()
+
+        out.setdefault("MADHYAPRADESH", "MADHYA PRADESH")
+        out.setdefault("UTTARPRADESH", "UTTAR PRADESH")
+        out.setdefault("ANDHRAPRADESH", "ANDHRA PRADESH")
+        out.setdefault("ARUNACHALPRADESH", "ARUNACHAL PRADESH")
+        out.setdefault("HIMACHALPRADESH", "HIMACHAL PRADESH")
+        out.setdefault("KERALA", "KERALA")
+        out.setdefault("KERA", "KERALA")
+        out.setdefault("JHARKHAND", "JHARKHAND")
+        out.setdefault("JHARK", "JHARKHAND")
+
+        setattr(self, "_known_state_display_map_cache", out)
+        return out
+
+    def _normalize_joined_state_tokens(self, clean_address: str) -> str:
+        out = str(clean_address or "")
+        states = self._known_state_display_map()
+
+        for compact, display in sorted(states.items(), key=lambda kv: len(kv[0]), reverse=True):
+            if len(compact) < 4:
+                continue
+            out = re.sub(rf"(?i)\b{re.escape(compact)}\b", display.upper(), out)
+
+        return re.sub(r"\s+", " ", out).strip()
+
+    def _candidate_from_token(self, token: str, state_hint: str = "") -> dict | None:
+        token = str(token or "").strip(" ,:-|.")
+        token_key = normalize_place_name(token).replace(" ", "")
+        if not token_key or len(token_key) < 4:
+            return None
+
+        states = self._known_state_display_map()
+        if token_key in states:
+            return {
+                "name": states[token_key],
+                "state": states[token_key],
+                "district": "",
+                "pincode": "",
+                "score": 100.0,
+            }
+
+        state_hint_key = normalize_place_name(state_hint).replace(" ", "")
+
+        try:
+            results = self.lookup(token, top_n=80)
+        except Exception:
+            results = []
+
+        best = None
+        best_rank = -10**9
+
+        for r in results:
+            raw_name = str(getattr(r, "name", "") or "")
+            clean_name = self._clean_display_place_name(raw_name)
+            name_key = normalize_place_name(clean_name).replace(" ", "")
+            district = str(getattr(r, "district", "") or "")
+            state = str(getattr(r, "state", "") or "")
+            district_key = normalize_place_name(district).replace(" ", "")
+            state_key = normalize_place_name(state).replace(" ", "")
+            score = float(getattr(r, "score", 0) or 0)
+
+            rank = score
+
+            if name_key == token_key:
+                rank += 100
+            if district_key == token_key:
+                rank += 140
+            if state_key == token_key:
+                rank += 160
+
+            if name_key.startswith(token_key) and len(name_key) > len(token_key):
+                rank += 50
+            if district_key.startswith(token_key) and len(district_key) > len(token_key):
+                rank += 80
+            if state_key.startswith(token_key) and len(state_key) > len(token_key):
+                rank += 90
+
+            if state_hint_key and state_key == state_hint_key:
+                rank += 35
+
+            if re.search(r"(?i)\b(?:G\.?P\.?O\.?|H\.?O\.?|S\.?O\.?|B\.?O\.?|P\.?O\.?|GPO|HO|SO|BO|PO)$", raw_name):
+                rank -= 45
+
+            if token_key not in {name_key, district_key, state_key}:
+                if not (
+                    name_key.startswith(token_key)
+                    or district_key.startswith(token_key)
+                    or state_key.startswith(token_key)
+                    or token_key.startswith(name_key)
+                ):
+                    rank -= 70
+
+            if rank > best_rank:
+                best_rank = rank
+
+                display_name = clean_name
+                if district_key == token_key or (district_key.startswith(token_key) and len(district_key) > len(token_key)):
+                    display_name = district.upper()
+                elif state_key == token_key or (state_key.startswith(token_key) and len(state_key) > len(token_key)):
+                    display_name = state.upper()
+
+                best = {
+                    "name": display_name,
+                    "state": state,
+                    "district": district,
+                    "pincode": str(getattr(r, "pincode", "") or ""),
+                    "score": getattr(r, "score", ""),
+                }
+
+        return best
+
+    def analyze_address(
+        self,
+        address: str,
+        *,
+        correct: bool = True,
+        include_tokens: bool = True,
+        top_n: int = 1,
+    ) -> dict:
+        raw_address = str(address or "").strip()
+
+        if not raw_address:
+            return {
+                "raw_address": "",
+                "clean_address": "",
+                "places": [],
+                "corrections": [],
+                "tokens": [],
+            }
+
+        clean_address = self.normalize_address_spacing(raw_address)
+        clean_address = self._normalize_joined_state_tokens(clean_address)
+
+        tokens = []
+        if include_tokens:
+            tokens = [
+                t.strip(" ,:-|.")
+                for t in re.findall(r"[A-Za-z][A-Za-z.]*", clean_address)
+                if t.strip(" ,:-|.")
+            ]
+
+        state_hint = ""
+        states = self._known_state_display_map()
+        joined_all = normalize_place_name(clean_address).replace(" ", "")
+        for compact, display in sorted(states.items(), key=lambda kv: len(kv[0]), reverse=True):
+            if compact and compact in joined_all:
+                state_hint = display
+                break
+
+        state_component_tokens = set()
+        if state_hint:
+            state_component_tokens = {
+                normalize_place_name(part).replace(" ", "")
+                for part in str(state_hint).split()
+                if normalize_place_name(part).replace(" ", "")
+            }
+
+        generic_terms = {
+            "HOUSE", "ROAD", "STREET", "LANE", "NAGAR", "COLONY",
+            "BUILDING", "FLAT", "FLOOR", "WARD", "POST", "NEAR",
+            "VILLAGE", "DISTRICT", "STATE", "TALUK", "TEHSIL",
+        }
+
+        places = []
+        corrections = []
+        seen_place_keys = set()
+        seen_corrections = set()
+
+        # If a multi-word state is present, keep it as one state entity and
+        # do not let individual words like MADHYA or PRADESH become wrong matches.
+        if state_hint:
+            state_key = normalize_place_name(state_hint).replace(" ", "")
+            if state_key:
+                seen_place_keys.add(state_key)
+                places.append({
+                    "text_found": state_hint.upper(),
+                    "name": state_hint.upper(),
+                    "state": state_hint.upper(),
+                    "district": "",
+                    "pincode": "",
+                    "score": 100.0,
+                })
+
+        if correct:
+            for token in tokens:
+                token_key = normalize_place_name(token).replace(" ", "")
+                if len(token_key) < 4 or token_key in generic_terms or token_key in state_component_tokens:
+                    continue
+
+                best = self._candidate_from_token(token, state_hint=state_hint)
+                if not best or not best.get("name"):
+                    continue
+
+                name_key = normalize_place_name(best["name"]).replace(" ", "")
+
+                if name_key != token_key:
+                    ckey = (token_key, name_key)
+                    if ckey not in seen_corrections:
+                        seen_corrections.add(ckey)
+                        corrections.append({
+                            "input": token,
+                            "corrected": best.get("name", ""),
+                            "state": best.get("state", ""),
+                            "district": best.get("district", ""),
+                            "pincode": best.get("pincode", ""),
+                        })
+
+                if name_key not in seen_place_keys:
+                    seen_place_keys.add(name_key)
+                    places.append({
+                        "text_found": token,
+                        "name": best.get("name", ""),
+                        "state": best.get("state", ""),
+                        "district": best.get("district", ""),
+                        "pincode": best.get("pincode", ""),
+                        "score": best.get("score", ""),
+                    })
+
+        try:
+            extracted = self.extract_places(clean_address)
+        except Exception:
+            extracted = []
+
+        for item in extracted:
+            match = getattr(item, "match", None)
+            text_found = str(getattr(item, "text", "") or "").strip()
+            if not match:
+                continue
+
+            token_key = normalize_place_name(text_found).replace(" ", "")
+            if token_key in state_component_tokens:
+                continue
+
+            raw_name = str(getattr(match, "name", "") or "").strip()
+            clean_name = self._clean_display_place_name(raw_name)
+            name_key = normalize_place_name(clean_name).replace(" ", "")
+
+            if not clean_name or name_key in seen_place_keys:
+                continue
+
+            if re.search(r"(?i)\b(?:G\.?P\.?O\.?|H\.?O\.?|S\.?O\.?|B\.?O\.?|P\.?O\.?|GPO|HO|SO|BO|PO)$", raw_name):
+                token_key = normalize_place_name(text_found).replace(" ", "")
+                if token_key and any(normalize_place_name(p["text_found"]).replace(" ", "") == token_key for p in places):
+                    continue
+
+            seen_place_keys.add(name_key)
+            places.append({
+                "text_found": text_found,
+                "name": clean_name,
+                "state": str(getattr(match, "state", "") or ""),
+                "district": str(getattr(match, "district", "") or ""),
+                "pincode": str(getattr(match, "pincode", "") or ""),
+                "score": getattr(match, "score", ""),
+            })
+
+        return {
+            "raw_address": raw_address,
+            "clean_address": clean_address,
+            "places": places,
+            "corrections": corrections,
+            "tokens": tokens,
+        }
+
+
     def lookup(
         self,
         query: str,

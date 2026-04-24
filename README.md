@@ -230,6 +230,57 @@ def evaluate_and_store_address(candidate: str):
     return True
 ```
 
+## Complete Address Analysis
+
+Use `analyze_address()` when you want spacing, extraction, correction, and details together.
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+result = ip.analyze_address("indrapuriratibadbhopalmadhyapradesh")
+
+print(result["clean_address"])
+print(result["places"])
+print(result["corrections"])
+```
+
+It returns:
+
+```python
+{
+    "raw_address": "...",
+    "clean_address": "...",
+    "places": [
+        {
+            "text_found": "...",
+            "name": "...",
+            "state": "...",
+            "district": "...",
+            "pincode": "...",
+            "score": ...
+        }
+    ],
+    "corrections": [
+        {
+            "input": "...",
+            "corrected": "...",
+            "state": "...",
+            "district": "...",
+            "pincode": "..."
+        }
+    ],
+    "tokens": [...]
+}
+```
+
+This is useful for OCR address pipelines where you want:
+
+```text
+spacing + extraction + correction + state/district/pincode details
+```
+
 ## Correct Place Name Search
 
 `indic-places` also supports correction-style place search through:
