@@ -230,6 +230,75 @@ def evaluate_and_store_address(candidate: str):
     return True
 ```
 
+## Correct Place Name Search
+
+`indic-places` also supports correction-style place search through:
+
+```python
+ip.correct_place_name(...)
+ip.correct_place(...)
+```
+
+Use these when the user input is incomplete, misspelled, or has missing letters.
+
+Examples:
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+print(ip.correct_place_name("bhop"))          # Bhopal
+print(ip.correct_place_name("bhopa"))         # Bhopal
+print(ip.correct_place_name("kera"))          # Kerala
+print(ip.correct_place_name("jhark"))         # Jharkhand
+print(ip.correct_place_name("hrissu kerala")) # Thrissur
+```
+
+For correction with details:
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+print(ip.correct_place("bhop"))
+print(ip.correct_place("kera"))
+print(ip.correct_place("jhark"))
+```
+
+Expected output style:
+
+```python
+{'name': 'Bhopal', 'state': 'MADHYA PRADESH', 'district': 'BHOPAL', 'pincode': ''}
+{'name': 'Kerala', 'state': 'KERALA', 'district': '', 'pincode': ''}
+{'name': 'Jharkhand', 'state': 'JHARKHAND', 'district': '', 'pincode': ''}
+```
+
+Difference between lookup and correction:
+
+```text
+lookup()              = gives search suggestions
+correct_place_name()  = gives one clean corrected place name
+correct_place()       = gives corrected place name with state/district/pincode details
+```
+
+This is useful for search boxes, OCR correction, address parsing, and user-entered location cleanup.
+
+### CMD Examples
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.correct_place_name('bhop'))"
+```
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.correct_place_name('kera')); print(ip.correct_place_name('jhark'))"
+```
+
+```cmd
+python -c "from indic_places import IndicPlaces; ip=IndicPlaces(); print(ip.correct_place('hrissu kerala'))"
+```
+
 ## Lookup Places
 
 ```python
