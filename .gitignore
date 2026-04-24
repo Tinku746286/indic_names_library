@@ -30,3 +30,5 @@ htmlcov/
 .mypy_cache/
 .DS_Store
 *.swp
+data/external_sources/
+data/geonames_india_places_full.csv
