@@ -48,10 +48,11 @@ from indic_places import IndicPlaces
 
 | Metric | Count |
 |---|---:|
-| Structured GeoNames + postal records | 815,477 |
-| Unique Indian place names | 817,641 |
-| Runtime OCR/custom place aliases | 652,331 |
-| Coverage | India-wide |
+| Structured GeoNames + postal records | 9 |
+| Unique structured place names | 140,360 |
+| Runtime OCR/custom place aliases | 1,502,371 |
+| Total combined unique place-name vocabulary | 1,636,645 |
+| Coverage | India-wide + expanded South India/Kerala LGD vocabulary |
 
 ## Quick Python Usage
 
