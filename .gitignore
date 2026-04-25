@@ -46,3 +46,5 @@ data/kerala_lgd_input/
 data/kerala_lgd_names_full.csv
 data/multi_state_lgd_input/
 data/multi_state_lgd_names_full.csv
+indic_places/data/fast_places.sqlite
+indic_places/data/*.sqlite

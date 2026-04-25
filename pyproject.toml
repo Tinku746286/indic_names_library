@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "indic-places"
-version = "1.4.10"
-description = "Indian place-name lookup, OCR address cleanup, SQLite prefix shortcut fast correction, large Indian vocabulary, extraction, and address intelligence"
+version = "1.4.12"
+description = "Indian place-name lookup, OCR address cleanup, instant precheck and SQLite prefix fast correction, large Indian vocabulary, extraction, and address intelligence"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }

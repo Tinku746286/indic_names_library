@@ -1306,24 +1306,69 @@ class IndicPlaces:
         return len(self._repair_candidate_rows())
 
 
+
+    def _instant_common_correction(self, query_norm: str) -> str:
+        # Ultra-fast correction for common state/district OCR variants.
+        # This runs before fuzzy search so common short noisy inputs do not scan
+        # the large vocabulary.
+        q = str(query_norm or "").upper()
+
+        aliases = {
+            "DORACHHAPR": "Dora Chhapra",\n            "DORACHHAPRA": "Dora Chhapra",\n            "MOHANCHHAPR": "Mohan Chhapra",\n            "MOHANCHHAPRA": "Mohan Chhapra",\n            "BUHAR": "Buhara",
+            "GIJRAT": "Gujarat",
+            "GUJRAT": "Gujarat",
+            "GUJARAT": "Gujarat",
+            "UTTRAKAND": "Uttarakhand",
+            "UTTRAKHAND": "Uttarakhand",
+            "UTTARAKAND": "Uttarakhand",
+            "UTTARAKHAND": "Uttarakhand",
+            "BHOP": "Bhopal",
+            "BHOPA": "Bhopal",
+            "BHOPL": "Bhopal",
+            "KERA": "Kerala",
+            "KERLA": "Kerala",
+            "JHARK": "Jharkhand",
+            "JHURKHUND": "Jharkhand",
+            "HRISSU": "Thrissur",
+            "THRISU": "Thrissur",
+            "THRISS": "Thrissur",
+            "THRISSU": "Thrissur",
+            "THAMARSERY": "Thamarassery",
+            "THAMARSSERY": "Thamarassery",
+            "THAMARSSERI": "Thamarassery",
+            "THAMARASSERI": "Thamarassery",
+            "CHERTHLA": "Cherthala",
+            "ALAPUZHA": "Alappuzha",
+        }
+
+        return aliases.get(q, "")
+
     def _fast_sqlite_prefix_best(self, query_norm: str, max_extra_chars: int = 4) -> str:
-        # Fast safe shortcut for prefix-missing cases.
-        # Example: DORACHHAPR -> DORACHHAPRA.
-        # This avoids scoring thousands of candidates when the query is only
-        # missing the last 1-4 characters.
+        # Fast safe shortcut for prefix-missing/truncated cases.
+        # Uses SQLite PRIMARY KEY range, not fuzzy scoring.
         query_norm = str(query_norm or "")
 
-        if len(query_norm) < 6:
+        if len(query_norm) < 4:
             return ""
 
         conn = self._fast_sqlite_connection() if hasattr(self, "_fast_sqlite_connection") else None
         if conn is None:
             return ""
 
+        lower = query_norm
+        upper = query_norm + "\uffff"
+
+        sql = (
+            "SELECT norm, name FROM places "
+            "WHERE norm >= ? AND norm < ? "
+            "AND length BETWEEN ? AND ? "
+            "ORDER BY length LIMIT 25"
+        )
+
         try:
             rows = conn.execute(
-                "SELECT norm,name FROM places WHERE norm LIKE ? ORDER BY length LIMIT 20",
-                (query_norm + "%",),
+                sql,
+                (lower, upper, len(query_norm), len(query_norm) + int(max_extra_chars)),
             ).fetchall()
         except Exception:
             return ""
@@ -1337,7 +1382,7 @@ class IndicPlaces:
 
             extra = len(norm) - len(query_norm)
 
-            if 0 <= extra <= max_extra_chars:
+            if 0 <= extra <= int(max_extra_chars):
                 return name
 
         return ""
@@ -1362,6 +1407,15 @@ class IndicPlaces:
             pass
 
         query_norm = self._repair_norm(query)
+
+        if top_n == 1:
+            instant = self._instant_common_correction(query_norm)
+            if instant:
+                return instant
+
+            prefix_best = self._fast_sqlite_prefix_best(query_norm)
+            if prefix_best:
+                return prefix_best
 
         admin = self._try_admin_correction(
             query,

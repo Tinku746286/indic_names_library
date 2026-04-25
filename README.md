@@ -702,3 +702,18 @@ MOHAN CHHAPR -> Mohan Chhapra
 ```
 
 This avoids scoring thousands of candidates for common OCR truncation cases.
+
+### Instant precheck for common corrections
+
+`correct_place_name()` now performs an instant precheck for common OCR variants before fuzzy search.
+
+Examples:
+
+```text
+BUHAR -> Buhara
+GIJRAT -> Gujarat
+UTTRAKAND -> Uttarakhand
+DORA CHHAPR -> Dora Chhapra
+```
+
+This prevents common short queries from entering the slow fuzzy-search path.
