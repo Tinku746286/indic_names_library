@@ -1314,7 +1314,11 @@ class IndicPlaces:
         q = str(query_norm or "").upper()
 
         aliases = {
-            "DORACHHAPR": "Dora Chhapra",\n            "DORACHHAPRA": "Dora Chhapra",\n            "MOHANCHHAPR": "Mohan Chhapra",\n            "MOHANCHHAPRA": "Mohan Chhapra",\n            "BUHAR": "Buhara",
+            "DORACHHAPR": "Dora Chhapra",
+            "DORACHHAPRA": "Dora Chhapra",
+            "MOHANCHHAPR": "Mohan Chhapra",
+            "MOHANCHHAPRA": "Mohan Chhapra",
+            "BUHAR": "Buhara",
             "GIJRAT": "Gujarat",
             "GUJRAT": "Gujarat",
             "GUJARAT": "Gujarat",
