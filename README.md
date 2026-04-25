@@ -665,3 +665,40 @@ IMMIDIVARAM -> ADIVARAM
 THAMARASSERI -> THAMARASSERY
 PILASSERYA -> PILASSERY
 ```\n
+
+### Accuracy-safe SQLite fast search index
+
+For large vocabularies, build the optional SQLite search index:
+
+```cmd
+python build_fast_sqlite_index.py
+```
+
+This creates:
+
+```text
+indic_places/data/fast_places.sqlite
+```
+
+When this file exists, `correct_place_name()` uses the same scoring logic as before, but candidate retrieval comes from SQLite buckets instead of building a huge in-memory index.
+
+The SQLite buckets mirror the old in-memory strategy: exact, prefix, missing-first-letter, consonant, and fallback buckets.
+
+### Fast admin override
+
+`correct_place_name()` uses a small high-confidence admin alias list instead of scanning all structured records for admin overrides.
+
+This keeps outputs such as `bhop -> Bhopal`, `kera -> Kerala`, and `jhark -> Jharkhand`, while allowing multi-word village/locality queries such as `DORA CHHAPR` to go directly to the fast vocabulary/SQLite search.
+
+### SQLite prefix shortcut
+
+For large vocabularies, `correct_place_name()` uses a safe SQLite prefix shortcut for names that are only missing the last few characters.
+
+Example:
+
+```text
+DORA CHHAPR -> Dora Chhapra
+MOHAN CHHAPR -> Mohan Chhapra
+```
+
+This avoids scoring thousands of candidates for common OCR truncation cases.

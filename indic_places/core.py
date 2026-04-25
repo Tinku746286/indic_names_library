@@ -919,6 +919,112 @@ class IndicPlaces:
         setattr(self, "_repair_candidate_index_cache", index)
         return index
 
+
+    def _fast_sqlite_index_path(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parent / "data" / "fast_places.sqlite"
+
+    def has_fast_search_index(self) -> bool:
+        return self._fast_sqlite_index_path().exists()
+
+    def _fast_sqlite_connection(self):
+        import sqlite3
+
+        cached = getattr(self, "_fast_sqlite_conn", None)
+        if cached is not None:
+            return cached
+
+        path = self._fast_sqlite_index_path()
+        if not path.exists():
+            return None
+
+        conn = sqlite3.connect(str(path), check_same_thread=False)
+        setattr(self, "_fast_sqlite_conn", conn)
+        return conn
+
+    def _fast_sqlite_candidates(self, query_norm: str, max_candidates: int = 8000) -> list[dict]:
+        """
+        Accuracy-safe SQLite candidate retrieval.
+
+        It mirrors the old in-memory candidate buckets:
+        exact, p3, skip1p3, p2, consonant, consonant_p6, p1 fallback.
+
+        Scoring still uses the existing Python scorer, so this should not
+        change ranking logic; it only avoids building/scanning the huge
+        in-memory index.
+        """
+        query_norm = str(query_norm or "")
+
+        if not query_norm:
+            return []
+
+        max_candidates = min(int(max_candidates or 8000), 8000)
+
+        conn = self._fast_sqlite_connection()
+        if conn is None:
+            return []
+
+        cons = re.sub(r"[AEIOU]", "", query_norm)
+        selected = []
+        seen = set()
+
+        def add_rows(sql: str, params: tuple) -> None:
+            if len(selected) >= max_candidates:
+                return
+
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            except Exception:
+                return
+
+            for norm, name in rows:
+                if norm in seen:
+                    continue
+                seen.add(norm)
+                selected.append({"norm": norm, "name": name, "state": "", "district": "", "kind": "sqlite"})
+                if len(selected) >= max_candidates:
+                    return
+
+        # Same bucket order as old _repair_candidate_subset.
+        add_rows("SELECT norm,name FROM places WHERE norm=? LIMIT 100", (query_norm,))
+
+        if len(query_norm) >= 3:
+            add_rows(
+                "SELECT norm,name FROM places WHERE p3=? ORDER BY length LIMIT ?",
+                (query_norm[:3], max_candidates - len(selected)),
+            )
+            add_rows(
+                "SELECT norm,name FROM places WHERE skip1p3=? ORDER BY length LIMIT ?",
+                (query_norm[:3], max_candidates - len(selected)),
+            )
+
+        if len(query_norm) >= 2:
+            add_rows(
+                "SELECT norm,name FROM places WHERE p2=? ORDER BY length LIMIT ?",
+                (query_norm[:2], max_candidates - len(selected)),
+            )
+
+        if cons:
+            add_rows(
+                "SELECT norm,name FROM places WHERE cons=? ORDER BY length LIMIT ?",
+                (cons, max_candidates - len(selected)),
+            )
+
+            if len(cons) >= 6:
+                add_rows(
+                    "SELECT norm,name FROM places WHERE cons6=? ORDER BY length LIMIT ?",
+                    (cons[:6], max_candidates - len(selected)),
+                )
+
+        if len(selected) < 200 and query_norm[:1]:
+            add_rows(
+                "SELECT norm,name FROM places WHERE p1=? ORDER BY length LIMIT ?",
+                (query_norm[:1], max_candidates - len(selected)),
+            )
+
+        return selected[:max_candidates]
+
+
     def _repair_candidate_subset(
         self,
         query_norm: str,
@@ -928,6 +1034,10 @@ class IndicPlaces:
         query_norm = str(query_norm or "")
         if not query_norm:
             return []
+
+        fast_rows = self._fast_sqlite_candidates(query_norm, max_candidates=max_candidates)
+        if fast_rows:
+            return fast_rows
 
         index = self._repair_candidate_index()
         selected = []
@@ -1026,6 +1136,7 @@ class IndicPlaces:
         return score
 
 
+
     def _preferred_admin_rows(self) -> list[dict]:
         cached = getattr(self, "_preferred_admin_rows_cache", None)
         if cached is not None:
@@ -1054,28 +1165,27 @@ class IndicPlaces:
                 "weight": weight,
             })
 
-        for rec in getattr(self, "records", []):
-            state = str(rec.get("state", "") or "").strip()
-            district = str(rec.get("district", "") or "").strip()
-
-            if state:
-                add(state.upper(), state.upper(), "", "state", 240)
-
-            if district:
-                add(district.upper(), state.upper(), district.upper(), "district", 220)
-
         aliases = [
-            ("Bhopal", "MADHYA PRADESH", "BHOPAL", "district", 320),
-            ("Kerala", "KERALA", "", "state", 360),
-            ("Jharkhand", "JHARKHAND", "", "state", 360),
-            ("Thrissur", "KERALA", "THRISSUR", "district", 320),
-            ("Muzaffarnagar", "UTTAR PRADESH", "MUZAFFARNAGAR", "district", 330),
-            ("Muzaffarpur", "BIHAR", "MUZAFFARPUR", "district", 320),
-            ("Maharashtra", "MAHARASHTRA", "", "state", 360),
-            ("Tamil Nadu", "TAMIL NADU", "", "state", 360),
-            ("Madhya Pradesh", "MADHYA PRADESH", "", "state", 360),
-            ("Uttar Pradesh", "UTTAR PRADESH", "", "state", 360),
-            ("Andhra Pradesh", "ANDHRA PRADESH", "", "state", 360),
+            ("Bhopal", "MADHYA PRADESH", "BHOPAL", "district", 360),
+            ("Kerala", "KERALA", "", "state", 380),
+            ("Jharkhand", "JHARKHAND", "", "state", 380),
+            ("Thrissur", "KERALA", "THRISSUR", "district", 360),
+            ("Muzaffarnagar", "UTTAR PRADESH", "MUZAFFARNAGAR", "district", 350),
+            ("Muzaffarpur", "BIHAR", "MUZAFFARPUR", "district", 340),
+            ("Maharashtra", "MAHARASHTRA", "", "state", 380),
+            ("Tamil Nadu", "TAMIL NADU", "", "state", 380),
+            ("Madhya Pradesh", "MADHYA PRADESH", "", "state", 380),
+            ("Uttar Pradesh", "UTTAR PRADESH", "", "state", 380),
+            ("Andhra Pradesh", "ANDHRA PRADESH", "", "state", 380),
+            ("Karnataka", "KARNATAKA", "", "state", 380),
+            ("Telangana", "TELANGANA", "", "state", 380),
+            ("Puducherry", "PUDUCHERRY", "", "state", 380),
+            ("Alappuzha", "KERALA", "ALAPPUZHA", "district", 350),
+            ("Kozhikode", "KERALA", "KOZHIKODE", "district", 350),
+            ("Kottayam", "KERALA", "KOTTAYAM", "district", 350),
+            ("Ernakulam", "KERALA", "ERNAKULAM", "district", 350),
+            ("Thiruvananthapuram", "KERALA", "THIRUVANANTHAPURAM", "district", 350),
+            ("Trivandrum", "KERALA", "THIRUVANANTHAPURAM", "district", 350),
         ]
 
         for name, state, district, kind, weight in aliases:
@@ -1083,6 +1193,8 @@ class IndicPlaces:
 
         setattr(self, "_preferred_admin_rows_cache", rows)
         return rows
+
+
 
     def _try_admin_correction(
         self,
@@ -1098,7 +1210,19 @@ class IndicPlaces:
         if len(query_norm) < 4:
             return [] if top_n != 1 else ""
 
-        if " " in query.strip() and len(query_norm) > 12:
+        multi_word_admin = {
+            "TAMILNADU",
+            "MADHYAPRADESH",
+            "UTTARPRADESH",
+            "ANDHRAPRADESH",
+            "ARUNACHALPRADESH",
+            "HIMACHALPRADESH",
+            "JAMMUANDKASHMIR",
+            "DADRAANDNAGARHAVELI",
+            "DAMANANDDIU",
+        }
+
+        if " " in query and query_norm not in multi_word_admin:
             return [] if top_n != 1 else ""
 
         state_hint_norm = self._repair_norm(state_hint)
@@ -1170,8 +1294,53 @@ class IndicPlaces:
 
         return out
 
+
     def warmup_correction_index(self) -> int:
+        if self.has_fast_search_index():
+            conn = self._fast_sqlite_connection()
+            if conn is not None:
+                try:
+                    return int(conn.execute("SELECT COUNT(*) FROM places").fetchone()[0])
+                except Exception:
+                    pass
         return len(self._repair_candidate_rows())
+
+
+    def _fast_sqlite_prefix_best(self, query_norm: str, max_extra_chars: int = 4) -> str:
+        # Fast safe shortcut for prefix-missing cases.
+        # Example: DORACHHAPR -> DORACHHAPRA.
+        # This avoids scoring thousands of candidates when the query is only
+        # missing the last 1-4 characters.
+        query_norm = str(query_norm or "")
+
+        if len(query_norm) < 6:
+            return ""
+
+        conn = self._fast_sqlite_connection() if hasattr(self, "_fast_sqlite_connection") else None
+        if conn is None:
+            return ""
+
+        try:
+            rows = conn.execute(
+                "SELECT norm,name FROM places WHERE norm LIKE ? ORDER BY length LIMIT 20",
+                (query_norm + "%",),
+            ).fetchall()
+        except Exception:
+            return ""
+
+        for norm, name in rows:
+            norm = str(norm or "")
+            name = str(name or "").strip()
+
+            if not norm or not name:
+                continue
+
+            extra = len(norm) - len(query_norm)
+
+            if 0 <= extra <= max_extra_chars:
+                return name
+
+        return ""
 
 
     def correct_place_name(
@@ -1204,6 +1373,13 @@ class IndicPlaces:
 
         if admin:
             return admin
+
+        # Fast safe shortcut for multi-word/locality queries that are only
+        # missing last few characters, e.g. DORA CHHAPR -> Dora Chhapra.
+        if top_n == 1 and (" " in str(query or "") or len(query_norm) >= 8):
+            prefix_best = self._fast_sqlite_prefix_best(query_norm)
+            if prefix_best:
+                return prefix_best
 
         rows = self._repair_candidate_subset(query_norm, max_edit=max_edit)
         scored = []
