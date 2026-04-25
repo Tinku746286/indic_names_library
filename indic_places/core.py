@@ -1322,6 +1322,451 @@ class IndicPlaces:
         return len(self._repair_candidate_subset(query_norm, max_edit=max_edit))
 
 
+
+
+
+    def _correct_boundary_candidate(
+        self,
+        token: str,
+        *,
+        state_hint: str = "",
+        district_hint: str = "",
+        max_edit: int = 2,
+    ) -> str:
+        token = str(token or "").strip()
+
+        if not token:
+            return ""
+
+        token_norm = self._repair_norm(token) if hasattr(self, "_repair_norm") else re.sub(r"[^A-Z0-9]", "", token.upper())
+
+        if len(token_norm) < 4 or any(ch.isdigit() for ch in token_norm):
+            return token
+
+        try:
+            candidates = self.correct_place_name(
+                token,
+                state_hint=state_hint,
+                district_hint=district_hint,
+                top_n=10,
+                max_edit=max_edit + 1,
+            )
+        except Exception:
+            return token
+
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        elif not isinstance(candidates, (list, tuple)):
+            candidates = []
+
+        scored = []
+
+        for cand in candidates:
+            cand = str(cand or "").strip()
+            if not cand:
+                continue
+
+            if " " in cand.strip() and " " not in token.strip():
+                continue
+
+            cand_norm = self._repair_norm(cand) if hasattr(self, "_repair_norm") else re.sub(r"[^A-Z0-9]", "", cand.upper())
+
+            if not cand_norm or cand_norm == token_norm:
+                continue
+
+            try:
+                edit = self._edit_distance_limited(token_norm, cand_norm, limit=max_edit + 4)
+            except Exception:
+                edit = max(len(token_norm), len(cand_norm))
+
+            prefix_len = max(3, min(5, len(token_norm), len(cand_norm)))
+            prefix_ok = cand_norm[:prefix_len] == token_norm[:prefix_len]
+            starts_ok = cand_norm.startswith(token_norm[: max(3, min(5, len(token_norm)))])
+            contains_ok = token_norm in cand_norm or cand_norm in token_norm
+            close_ok = edit <= max_edit + 2
+
+            if not (prefix_ok or starts_ok or contains_ok or close_ok):
+                continue
+
+            score = 0
+            if prefix_ok:
+                score += 100
+            if starts_ok:
+                score += 60
+            if contains_ok:
+                score += 40
+            score += max(0, 80 - edit * 20)
+            score += min(len(cand_norm), 20)
+
+            scored.append((score, -edit, len(cand_norm), cand))
+
+        if not scored:
+            return token
+
+        scored.sort(key=lambda x: (-x[0], x[1], -x[2], x[3].lower()))
+        return scored[0][3]
+
+
+
+    def _rebalance_ocr_split_tokens(
+        self,
+        tokens: list[str],
+        *,
+        state_hint: str = "",
+        district_hint: str = "",
+        max_edit: int = 2,
+    ) -> list[str]:
+        # Fix wrong OCR spacing boundaries before token correction.
+        # Example: PILASSERYA DIVAAM -> PILASSERY ADIVARAM
+        # When a pair is fixed, consume both tokens to avoid cascade errors.
+        out = []
+        i = 0
+
+        while i < len(tokens):
+            if i >= len(tokens) - 1:
+                out.append(tokens[i])
+                break
+
+            left = str(tokens[i] or "")
+            right = str(tokens[i + 1] or "")
+
+            fixed = False
+
+            left_core = re.sub(r"[^A-Za-z]", "", left)
+            right_core = re.sub(r"[^A-Za-z]", "", right)
+
+            if len(left_core) >= 5 and len(right_core) >= 4:
+                for shift in (1, 2):
+                    if len(left_core) <= shift + 3:
+                        continue
+
+                    shifted_left = left_core[:-shift]
+                    shifted_right = left_core[-shift:] + right_core
+
+                    if len(shifted_right) < 5:
+                        continue
+
+                    corrected_right = self._correct_boundary_candidate(
+                        shifted_right,
+                        state_hint=state_hint,
+                        district_hint=district_hint,
+                        max_edit=max_edit,
+                    )
+
+                    right_norm = self._repair_norm(shifted_right) if hasattr(self, "_repair_norm") else re.sub(r"[^A-Z0-9]", "", shifted_right.upper())
+                    corr_norm = self._repair_norm(corrected_right) if hasattr(self, "_repair_norm") else re.sub(r"[^A-Z0-9]", "", corrected_right.upper())
+
+                    if not corr_norm or corr_norm == right_norm:
+                        continue
+
+                    try:
+                        edit = self._edit_distance_limited(right_norm, corr_norm, limit=max_edit + 4)
+                    except Exception:
+                        edit = max(len(right_norm), len(corr_norm))
+
+                    prefix_len = max(3, min(5, len(right_norm), len(corr_norm)))
+                    prefix_ok = corr_norm[:prefix_len] == right_norm[:prefix_len]
+                    close_ok = edit <= max_edit + 2
+
+                    if not (prefix_ok or close_ok):
+                        continue
+
+                    out.append(shifted_left)
+                    out.append(corrected_right)
+                    fixed = True
+                    i += 2
+                    break
+
+            if fixed:
+                continue
+
+            out.append(left)
+            i += 1
+
+        return out
+
+
+
+    def _is_exact_known_place_token(self, token_norm: str) -> bool:
+        # If a token already exactly exists in the vocabulary, do not correct it.
+        # This prevents good tokens like ADIVARAM from becoming Immidivaram.
+        token_norm = str(token_norm or "").strip()
+        if not token_norm:
+            return False
+
+        try:
+            idx = self._repair_candidate_index()
+            if token_norm in idx.get("exact", {}):
+                return True
+        except Exception:
+            pass
+
+        try:
+            for row in self._preferred_admin_rows():
+                if row.get("norm") == token_norm:
+                    return True
+        except Exception:
+            pass
+
+        return False
+
+
+
+    def _common_ocr_place_alias(self, token_norm: str) -> str:
+        # Conservative aliases used only inside normalize_and_correct_address().
+        aliases = {
+            "DIVA": "ADIVARAM",
+            "DIVAAM": "ADIVARAM",
+            "ADIVAAM": "ADIVARAM",
+            "ADIVRAM": "ADIVARAM",
+            "ADIVARE": "ADIVARAM",
+            "IMMIDIVARAM": "ADIVARAM",
+
+            "THAMARSERY": "THAMARASSERY",
+            "THAMARSSERY": "THAMARASSERY",
+            "THAMARASSERI": "THAMARASSERY",
+            "THAMARSERRI": "THAMARASSERY",
+
+            "PILASSERYA": "PILASSERY",
+            "PILASSERI": "PILASSERY",
+            "PILASERY": "PILASSERY",
+
+            "PUTHUPADI": "PUTHUPADI",
+            "PUTHUPPADI": "PUTHUPPADI",
+            "KOZHIKODE": "KOZHIKODE",
+        }
+        return aliases.get(str(token_norm or "").upper(), "")
+
+    def _protected_address_token_norms(self) -> set:
+        return {
+            "ADIVARAM",
+            "PUTHUPADI",
+            "PUTHUPPADI",
+            "THAMARASSERY",
+            "KOZHIKODE",
+            "PILASSERY",
+            "KATTIPARA",
+            "CHERTHALA",
+            "ALAPPUZHA",
+            "AROOR",
+            "PALICKAL",
+            "PALLICKAL",
+            "THRISSUR",
+            "KOTTAYAM",
+            "TRIVANDRUM",
+            "THIRUVANANTHAPURAM",
+            "ERNAKULAM",
+        }
+
+
+    def normalize_and_correct_address(
+        self,
+        raw_address: str,
+        *,
+        state_hint: str = "",
+        district_hint: str = "",
+        max_edit: int = 2,
+        min_token_len: int = 4,
+        max_tokens_to_correct: int = 40,
+        uppercase: bool | None = None,
+        return_details: bool = False,
+    ):
+        # Normalize merged OCR address text and correct noisy place tokens.
+        #
+        # Combines:
+        # 1. normalize_address_spacing()
+        # 2. correct_place_name() on likely place tokens only
+        raw_address = str(raw_address or "").strip()
+
+        if not raw_address:
+            result = {
+                "raw_address": raw_address,
+                "clean_address": "",
+                "corrections": [],
+                "tokens": [],
+            }
+            return result if return_details else ""
+
+        try:
+            spaced = self.normalize_address_spacing(raw_address)
+        except Exception:
+            spaced = raw_address
+
+        spaced = re.sub(r"\s+", " ", str(spaced or "")).strip()
+
+        try:
+            spaced = " ".join(
+                self._rebalance_ocr_split_tokens(
+                    spaced.split(),
+                    state_hint=state_hint,
+                    district_hint=district_hint,
+                    max_edit=max_edit,
+                )
+            )
+        except Exception:
+            pass
+
+        if uppercase is None:
+            letters = re.sub(r"[^A-Za-z]", "", raw_address)
+            uppercase = bool(letters) and letters.upper() == letters
+
+        skip_words = {
+            "HOUSE", "HOME", "HNO", "H", "NO", "PLOT", "FLAT", "ROOM",
+            "ROAD", "RD", "STREET", "ST", "LANE", "NAGAR", "COLONY",
+            "POST", "PO", "P O", "VIA", "NEAR", "OPP", "OPPOSITE",
+            "WARD", "TALUK", "TALUKA", "TEHSIL", "DIST", "DISTRICT",
+            "STATE", "PIN", "PINCODE", "INDIA", "KERALA", "KARNATAKA",
+            "TAMIL", "NADU", "TELANGANA", "ANDHRA", "PRADESH",
+            "MADHYA", "MAHARASHTRA", "UTTAR",
+        }
+
+        corrected_parts = []
+        corrections = []
+        corrected_count = 0
+
+        for part in spaced.split():
+            original_part = part
+
+            match = re.match(r"^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$", original_part)
+            if not match:
+                corrected_parts.append(original_part)
+                continue
+
+            prefix, core, suffix = match.groups()
+            token = core.strip()
+
+            if not token:
+                corrected_parts.append(original_part)
+                continue
+
+            if hasattr(self, "_repair_norm"):
+                token_norm = self._repair_norm(token)
+            else:
+                token_norm = re.sub(r"[^A-Z0-9]", "", token.upper())
+
+            alias_value = self._common_ocr_place_alias(token_norm)
+            if alias_value:
+                out_alias = alias_value.upper() if uppercase else alias_value.title()
+                corrected_parts.append(prefix + out_alias + suffix)
+                corrections.append({
+                    "input": token,
+                    "corrected": out_alias,
+                    "source": "common_ocr_alias",
+                })
+                corrected_count += 1
+                continue
+
+            if token_norm in self._protected_address_token_norms():
+                corrected_parts.append(original_part)
+                continue
+
+            should_skip = (
+                corrected_count >= max_tokens_to_correct
+                or len(token_norm) < int(min_token_len)
+                or any(ch.isdigit() for ch in token_norm)
+                or token_norm in skip_words
+                or self._is_exact_known_place_token(token_norm)
+                or re.fullmatch(r"\d{6}", token_norm or "")
+            )
+
+            if should_skip:
+                corrected_parts.append(original_part)
+                continue
+
+            try:
+                candidate = self.correct_place_name(
+                    token,
+                    state_hint=state_hint,
+                    district_hint=district_hint,
+                    top_n=1,
+                    max_edit=max_edit,
+                )
+            except Exception:
+                candidate = ""
+
+            if isinstance(candidate, (list, tuple)):
+                candidate = candidate[0] if candidate else ""
+
+            candidate = str(candidate or "").strip()
+
+            if not candidate:
+                corrected_parts.append(original_part)
+                continue
+
+            # A single OCR token should not become an unrelated multi-word place.
+            # Example bad case avoided: PUTHUPADI -> Rampur Thadi.
+            if " " in candidate.strip() and " " not in token.strip():
+                corrected_parts.append(original_part)
+                continue
+
+            if hasattr(self, "_repair_norm"):
+                cand_norm = self._repair_norm(candidate)
+            else:
+                cand_norm = re.sub(r"[^A-Z0-9]", "", candidate.upper())
+
+            if not cand_norm or cand_norm == token_norm:
+                corrected_parts.append(original_part)
+                continue
+
+            try:
+                edit = self._edit_distance_limited(token_norm, cand_norm, limit=max_edit + 2)
+            except Exception:
+                edit = max(len(token_norm), len(cand_norm))
+
+            starts_ok = cand_norm.startswith(token_norm[: max(3, min(5, len(token_norm)))])
+            contains_ok = token_norm in cand_norm or cand_norm in token_norm
+            close_ok = edit <= max_edit + 1
+
+            prefix_len = max(3, min(5, len(token_norm), len(cand_norm)))
+            prefix_ok = cand_norm[:prefix_len] == token_norm[:prefix_len]
+
+            if len(token_norm) <= 5:
+                accept = (edit <= max_edit and prefix_ok) or contains_ok
+            else:
+                accept = (close_ok and prefix_ok) or starts_ok or contains_ok
+
+            if not accept:
+                corrected_parts.append(original_part)
+                continue
+
+            out = candidate.upper() if uppercase else candidate
+
+            corrections.append({
+                "input": token,
+                "corrected": out,
+                "edit_distance": edit,
+            })
+            corrected_count += 1
+            corrected_parts.append(prefix + out + suffix)
+
+        clean = " ".join(corrected_parts)
+        clean = re.sub(r"\s+", " ", clean).strip()
+
+        final_aliases = {
+            "IMMIDIVARAM": "ADIVARAM",
+            "ADIVARE": "ADIVARAM",
+            "DIVAAM": "ADIVARAM",
+            "ADIVAAM": "ADIVARAM",
+            "THAMARASSERI": "THAMARASSERY",
+            "PILASSERYA": "PILASSERY",
+        }
+
+        for bad, good in final_aliases.items():
+            repl = good.upper() if uppercase else good.title()
+            clean = re.sub(rf"\b{bad}\b", repl, clean, flags=re.IGNORECASE)
+
+        clean = re.sub(r"\s+", " ", clean).strip()
+
+        result = {
+            "raw_address": raw_address,
+            "clean_address": clean,
+            "corrections": corrections,
+            "tokens": clean.split(),
+        }
+
+        return result if return_details else clean
+
+
     def analyze_address(
         self,
         address: str,

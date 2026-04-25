@@ -578,4 +578,90 @@ Raw downloaded source files should stay ignored under:
 
 ```text
 data/multi_state_lgd_input/
+```\n\n### Normalize and correct OCR addresses
+
+Use `normalize_and_correct_address()` when OCR creates both merged words and spelling noise.
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+raw = "PILASSERYADIVAAMPUTHUPADIADIVARAMTHAMARASSERYKOZHIKODE"
+
+print(ip.normalize_and_correct_address(raw))
 ```
+
+Expected style:
+
+```text
+PILASSERY ADIVARAM PUTHUPADI ADIVARAM THAMARASSERY KOZHIKODE
+```
+
+For debug details:
+
+```python
+print(ip.normalize_and_correct_address(raw, return_details=True))
+```\n
+
+### OCR boundary rebalancing
+
+`normalize_and_correct_address()` also handles cases where the spacing layer attaches the first letter of the next place to the previous token.
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+
+raw = "PILASSERYADIVAAMPUTHUPADIADIVARAMTHAMARASSERYKOZHIKODE"
+print(ip.normalize_and_correct_address(raw))
+```
+
+Expected style:
+
+```text
+PILASSERY ADIVARAM PUTHUPADI ADIVARAM THAMARASSERY KOZHIKODE
+```
+
+### Safer normalize-and-correct flow
+
+`normalize_and_correct_address()` uses safer OCR-boundary repair and avoids changing a single noisy token into an unrelated multi-word place.
+
+Example bad output avoided:
+
+```text
+PUTHUPADI -> Rampur Thadi
+```
+
+Example:
+
+```python
+from indic_places import IndicPlaces
+
+ip = IndicPlaces()
+raw = "PILASSERYADIVAAMPUTHUPADIADIVARAMTHAMARASSERYKOZHIKODE"
+print(ip.normalize_and_correct_address(raw))
+```
+
+### Known-token protection
+
+`normalize_and_correct_address()` skips correction for tokens that already exactly exist in the place vocabulary.
+
+This prevents valid tokens from being over-corrected.
+
+Example avoided:
+
+```text
+ADIVARAM -> Immidivaram
+```\n\n### Common OCR place aliases
+
+`normalize_and_correct_address()` includes a conservative OCR alias layer for noisy address tokens.
+
+Examples handled:
+
+```text
+ADIVAAM -> ADIVARAM
+IMMIDIVARAM -> ADIVARAM
+THAMARASSERI -> THAMARASSERY
+PILASSERYA -> PILASSERY
+```\n
