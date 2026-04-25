@@ -48,11 +48,13 @@ from indic_places import IndicPlaces
 
 | Metric | Count |
 |---|---:|
-| Structured GeoNames + postal records | 9 |
-| Unique structured place names | 140,360 |
+| Structured GeoNames + postal records | 815,477 |
+| Unique structured place names | 817,641 |
 | Runtime OCR/custom place aliases | 1,502,371 |
-| Total combined unique place-name vocabulary | 1,636,645 |
+| Approx. total vocabulary entries across structured + custom layers | 2,317,848 |
 | Coverage | India-wide + expanded South India/Kerala LGD vocabulary |
+
+> Note: `custom_places.txt` is the large runtime OCR/custom vocabulary layer. Structured GeoNames/postal records remain stored separately in `places.json` and `places_index.json.gz`.
 
 ## Quick Python Usage
 
